@@ -10,6 +10,8 @@ router.get('/:id', gatewayController.getById);
 router.post('/', gatewayController.create);
 router.put('/:id', gatewayController.update);
 router.delete('/:id', gatewayController.delete);
+router.get('/:id/logs', gatewayController.getLogs);
+router.get('/:id/stats', gatewayController.getStats);
 router.post('/:id/credentials', gatewayController.regenerateCredentials);
 
 module.exports = router;

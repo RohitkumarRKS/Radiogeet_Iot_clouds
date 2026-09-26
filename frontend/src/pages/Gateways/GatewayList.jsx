@@ -2,8 +2,9 @@ import { useState, useEffect } from 'react';
 import {
   Network, Plus, Trash2, Search, CheckCircle2, XCircle, RefreshCw,
   Copy, Cpu, Activity, Eye, Server, Radio, ShieldCheck, ChevronRight,
-  X, Layers, Zap, Info, ArrowUpRight
+  X, Layers, Zap, Info, ArrowUpRight, Sliders
 } from 'lucide-react';
+import ThingsBoardGatewayConfigModal from './ThingsBoardGatewayConfigModal';
 import api from '../../api/axios';
 import { useToast } from '../../context/ToastContext';
 import { useAuthModal } from '../../components/Common/AuthModal';
@@ -22,6 +23,7 @@ export default function GatewayList() {
   const [detailLoading, setDetailLoading] = useState(false);
   const [subDevicesData, setSubDevicesData] = useState([]);
   const [revealedTokens, setRevealedTokens] = useState({});
+  const [configModalGateway, setConfigModalGateway] = useState(null);
 
   const [form, setForm] = useState({
     name: '',
@@ -357,7 +359,28 @@ export default function GatewayList() {
                     {g.lastSeen}
                   </td>
                   <td style={{ textAlign: 'right' }} onClick={e => e.stopPropagation()}>
-                    <div style={{ display: 'flex', gap: 4, justifyContent: 'flex-end' }}>
+                    <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end', alignItems: 'center' }}>
+                      <button
+                        type="button"
+                        className="btn btn-sm"
+                        style={{
+                          backgroundColor: '#00695c',
+                          color: '#ffffff',
+                          border: 'none',
+                          padding: '4px 10px',
+                          borderRadius: 4,
+                          fontSize: '11px',
+                          fontWeight: 600,
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: 4,
+                          cursor: 'pointer'
+                        }}
+                        onClick={() => setConfigModalGateway(g)}
+                        title="Open ThingsBoard Cloud Configuration"
+                      >
+                        <Sliders size={12} /> Config
+                      </button>
                       <button
                         className="btn btn-ghost btn-sm"
                         onClick={() => openGatewayDrawer(g)}
@@ -400,7 +423,29 @@ export default function GatewayList() {
                   </div>
                 </div>
               </div>
-              <button type="button" className="modal-close" onClick={() => setSelectedGateway(null)}>✕</button>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <button
+                  type="button"
+                  className="btn btn-sm"
+                  style={{
+                    backgroundColor: '#00695c',
+                    color: '#ffffff',
+                    border: 'none',
+                    fontWeight: 600,
+                    fontSize: '12px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 6,
+                    padding: '6px 12px',
+                    borderRadius: 4,
+                    cursor: 'pointer'
+                  }}
+                  onClick={() => setConfigModalGateway(selectedGateway)}
+                >
+                  <Sliders size={13} /> ThingsBoard Config
+                </button>
+                <button type="button" className="modal-close" onClick={() => setSelectedGateway(null)}>✕</button>
+              </div>
             </div>
 
             <div className="modal-body" style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
@@ -606,6 +651,15 @@ export default function GatewayList() {
             </form>
           </div>
         </div>
+      )}
+
+      {/* ThingsBoard Cloud Gateway General Configuration Modal */}
+      {configModalGateway && (
+        <ThingsBoardGatewayConfigModal
+          gateway={configModalGateway}
+          onClose={() => setConfigModalGateway(null)}
+          onUpdated={loadGateways}
+        />
       )}
     </div>
   );
