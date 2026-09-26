@@ -83,7 +83,19 @@ async function seed() {
     { id: uuidv4(), tenantId: tenant.id, name: 'Temperature Sensor', description: 'Measures ambient temperature', type: 'SENSOR', transportType: 'MQTT', isDefault: true },
     { id: uuidv4(), tenantId: tenant.id, name: 'Humidity Sensor', description: 'Measures humidity levels', type: 'SENSOR', transportType: 'MQTT' },
     { id: uuidv4(), tenantId: tenant.id, name: 'Smart Gateway', description: 'IoT gateway for connecting multiple sensors', type: 'GATEWAY', transportType: 'MQTT' },
-    { id: uuidv4(), tenantId: tenant.id, name: 'Energy Meter', description: 'Measures power consumption', type: 'SENSOR', transportType: 'HTTP' },
+    {
+      id: uuidv4(),
+      tenantId: tenant.id,
+      name: 'Industrial Energy Meter',
+      description: '3-Phase Multifunction Modbus Energy Meter (kWh, kW, V, I, PF)',
+      type: 'SENSOR',
+      transportType: 'MQTT',
+      alarmRules: [
+        { key: 'powerFactor', condition: 'LESS_THAN', threshold: 0.85, alarmType: 'Low Power Factor Alert', severity: 'CRITICAL' },
+        { key: 'voltage_V', condition: 'GREATER_THAN', threshold: 245.0, alarmType: 'High Voltage Warning', severity: 'MAJOR' },
+        { key: 'activePower_kW', condition: 'GREATER_THAN', threshold: 100.0, alarmType: 'Peak Power Demand Exceeded', severity: 'WARNING' },
+      ],
+    },
     { id: uuidv4(), tenantId: tenant.id, name: 'Air Quality Sensor', description: 'Monitors AQI and pollutants', type: 'SENSOR', transportType: 'MQTT' },
   ]);
 

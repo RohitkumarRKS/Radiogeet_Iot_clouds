@@ -40,10 +40,19 @@ function startTelemetrySimulator() {
         } else if (dev.type === 'humidity') {
           telemetryData.humidity = parseFloat((55 + Math.sin(now / 8000) * 15 + (Math.random() - 0.5) * 2.5).toFixed(2));
           telemetryData.temperature = parseFloat((23 + (Math.random() - 0.5) * 0.8).toFixed(2));
-        } else if (dev.type === 'energy') {
-          telemetryData.power = parseFloat((280 + Math.sin(now / 6000) * 120 + (Math.random() - 0.5) * 15).toFixed(2));
-          telemetryData.voltage = parseFloat((230 + (Math.random() - 0.5) * 4).toFixed(2));
-          telemetryData.current = parseFloat((telemetryData.power / telemetryData.voltage).toFixed(2));
+        } else if (dev.type === 'energy' || dev.type === 'energy_meter') {
+          const voltage = parseFloat((415.0 + (Math.random() - 0.5) * 6).toFixed(2));
+          const current = parseFloat((55.0 + Math.sin(now / 10000) * 25 + (Math.random() - 0.5) * 5).toFixed(2));
+          const powerFactor = parseFloat(Math.min(1.0, Math.max(0.75, 0.92 + (Math.random() - 0.5) * 0.08)).toFixed(2));
+          const activePower = parseFloat(((voltage * current * 1.732 * powerFactor) / 1000).toFixed(2));
+          const frequency = parseFloat((49.95 + (Math.random() - 0.5) * 0.1).toFixed(2));
+
+          telemetryData.voltage_V = voltage;
+          telemetryData.current_A = current;
+          telemetryData.activePower_kW = activePower;
+          telemetryData.powerFactor = powerFactor;
+          telemetryData.frequency_Hz = frequency;
+          telemetryData.totalEnergy_kWh = parseFloat((14500 + (now % 86400000) / 3600).toFixed(2));
         } else if (dev.type === 'air_quality') {
           telemetryData.aqi = Math.floor(45 + Math.sin(now / 15000) * 30 + Math.random() * 10);
           telemetryData.pm25 = parseFloat((12 + Math.random() * 8).toFixed(1));
