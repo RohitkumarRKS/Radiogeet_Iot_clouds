@@ -27,9 +27,13 @@ exports.getAll = async (req, res, next) => {
       attributes: ['id', 'name', 'type', 'isActive', 'additionalInfo', 'lastActivityTime'],
     });
 
+    const now = Date.now();
     const result = gateways.map((gw) => {
       const info = gw.additionalInfo || {};
       const subDevices = allDevices.filter(d => d.additionalInfo && d.additionalInfo.gatewayId === gw.id);
+
+      // A gateway is strictly ONLINE if it has communicated in the last 60 seconds
+      const isGwOnline = Boolean(gw.isActive && gw.lastActivityTime && (now - new Date(gw.lastActivityTime).getTime() < 60000));
 
       return {
         id: gw.id,
@@ -37,22 +41,25 @@ exports.getAll = async (req, res, next) => {
         label: gw.label || gw.name,
         type: info.protocolType || gw.type || 'Modbus Gateway',
         protocolType: info.protocolType || 'Modbus TCP / RTU',
-        status: gw.isActive ? 'ONLINE' : 'OFFLINE',
-        isActive: gw.isActive,
+        status: isGwOnline ? 'ONLINE' : 'OFFLINE',
+        isActive: isGwOnline,
         accessToken: gw.accessToken,
         ip: info.ip || '192.168.1.100',
         port: info.port || (info.protocolType?.includes('Modbus') ? 502 : 1883),
         pollInterval: info.pollInterval || 5000,
         description: info.description || gw.label || '',
         connectedDevices: subDevices.length,
-        subDevices: subDevices.map(sd => ({
-          id: sd.id,
-          name: sd.name,
-          type: sd.type,
-          status: sd.isActive ? 'ONLINE' : 'OFFLINE',
-          lastSeen: sd.lastActivityTime ? new Date(sd.lastActivityTime).toLocaleString() : 'Never',
-        })),
-        lastSeen: gw.lastActivityTime ? new Date(gw.lastActivityTime).toLocaleString() : 'Never',
+        subDevices: subDevices.map(sd => {
+          const isSdOnline = Boolean(sd.isActive && sd.lastActivityTime && (now - new Date(sd.lastActivityTime).getTime() < 60000));
+          return {
+            id: sd.id,
+            name: sd.name,
+            type: sd.type,
+            status: isSdOnline ? 'ONLINE' : 'OFFLINE',
+            lastSeen: sd.lastActivityTime ? new Date(sd.lastActivityTime).toLocaleString() : 'Never',
+          };
+        }),
+        lastSeen: gw.lastActivityTime ? new Date(gw.lastActivityTime).toLocaleString() : 'Never (Waiting for connection)',
         createdAt: gw.createdAt,
       };
     });
@@ -107,18 +114,21 @@ exports.getById = async (req, res, next) => {
           };
         });
 
+        const isSdOnline = Boolean(sd.isActive && sd.lastActivityTime && (Date.now() - new Date(sd.lastActivityTime).getTime() < 60000));
         return {
           id: sd.id,
           name: sd.name,
           label: sd.label,
           type: sd.type,
           accessToken: sd.accessToken,
-          status: sd.isActive ? 'ONLINE' : 'OFFLINE',
+          status: isSdOnline ? 'ONLINE' : 'OFFLINE',
           lastSeen: sd.lastActivityTime ? new Date(sd.lastActivityTime).toLocaleString() : 'Never',
           telemetry,
         };
       })
     );
+
+    const isGwOnline = Boolean(gateway.isActive && gateway.lastActivityTime && (Date.now() - new Date(gateway.lastActivityTime).getTime() < 60000));
 
     res.json({
       id: gateway.id,
@@ -126,8 +136,8 @@ exports.getById = async (req, res, next) => {
       label: gateway.label,
       type: info.protocolType || gateway.type || 'Modbus Gateway',
       protocolType: info.protocolType || 'Modbus TCP / RTU',
-      status: gateway.isActive ? 'ONLINE' : 'OFFLINE',
-      isActive: gateway.isActive,
+      status: isGwOnline ? 'ONLINE' : 'OFFLINE',
+      isActive: isGwOnline,
       accessToken: gateway.accessToken,
       ip: info.ip || '192.168.1.100',
       port: info.port || 502,
@@ -168,7 +178,7 @@ exports.create = async (req, res, next) => {
       label: description || `${protocolType || 'Modbus'} Edge Gateway`,
       type: 'gateway',
       isGateway: true,
-      isActive: true,
+      isActive: false, // Starts OFFLINE until physical gateway makes first connection
       tenantId,
       deviceProfileId: profile ? profile.id : null,
       accessToken: token,
