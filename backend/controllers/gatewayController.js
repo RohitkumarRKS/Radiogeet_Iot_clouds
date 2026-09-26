@@ -133,7 +133,7 @@ exports.getById = async (req, res, next) => {
     const defaultGatewayConfig = info.gatewayConfig || {
       remoteConfiguration: info.remoteConfiguration !== undefined ? info.remoteConfiguration : true,
       remoteShell: info.remoteShell !== undefined ? info.remoteShell : false,
-      platformHost: info.platformHost || 'thingsboard.cloud',
+      platformHost: info.platformHost || 'radiogeet.cloud',
       platformPort: info.platformPort || 1883,
       security: {
         type: info.securityType || 'ACCESS_TOKEN',
@@ -233,7 +233,7 @@ exports.create = async (req, res, next) => {
         gatewayConfig: gatewayConfig || {
           remoteConfiguration: true,
           remoteShell: false,
-          platformHost: 'thingsboard.cloud',
+          platformHost: 'radiogeet.cloud',
           platformPort: 1883,
           security: {
             type: 'ACCESS_TOKEN',
@@ -377,7 +377,7 @@ exports.getLogs = async (req, res, next) => {
       { id: 2, ts: new Date(now - 4500).toISOString(), level: 'INFO', connector: 'Modbus', message: `[Modbus RS485] Polling cycle complete. 4 slave registers read with 0 parity errors.` },
       { id: 3, ts: new Date(now - 9800).toISOString(), level: 'DEBUG', connector: 'Engine', message: `[Remote Configuration] Synchronized configuration version 3.4.1 from CloudBoard cloud.` },
       { id: 4, ts: new Date(now - 16200).toISOString(), level: isOnline ? 'INFO' : 'WARN', connector: 'Storage', message: isOnline ? `[Buffer Memory] In-memory telemetry queue drained (0 records pending).` : `[Buffer Memory] Device silent. Storing local telemetry in offline file buffer.` },
-      { id: 5, ts: new Date(now - 28000).toISOString(), level: 'INFO', connector: 'Core', message: `[ThingsBoard Gateway Core] Active connectors: Modbus RS485, MQTT Edge Bridge, REST Ingestion.` },
+      { id: 5, ts: new Date(now - 28000).toISOString(), level: 'INFO', connector: 'Core', message: `[RadioGeet Gateway Core] Active connectors: Modbus RS485, MQTT Edge Bridge, REST Ingestion.` },
       { id: 6, ts: new Date(now - 45000).toISOString(), level: 'INFO', connector: 'Security', message: `[Security] Credentials validated. Remote shell enabled: false.` },
     ];
 
