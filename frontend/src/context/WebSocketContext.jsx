@@ -22,7 +22,10 @@ export function WebSocketProvider({ children }) {
     try {
       const host = (typeof window !== 'undefined' && window.location.hostname) ? window.location.hostname : 'localhost';
       const protocol = (typeof window !== 'undefined' && window.location.protocol === 'https:') ? 'wss:' : 'ws:';
-      const ws = new WebSocket(`${protocol}//${host}:2004/api/ws?token=${token}`);
+      const port = (typeof window !== 'undefined' && window.location.port === '5173')
+        ? ':2004'
+        : (typeof window !== 'undefined' && window.location.port ? `:${window.location.port}` : '');
+      const ws = new WebSocket(`${protocol}//${host}${port}/api/ws?token=${token}`);
 
       ws.onopen = () => {
         setConnected(true);

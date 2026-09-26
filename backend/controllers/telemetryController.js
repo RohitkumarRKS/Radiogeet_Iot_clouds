@@ -119,6 +119,70 @@ exports.pushByAccessToken = async (req, res, next) => {
   }
 };
 
+// Public endpoint - gateways push telemetry for multiple sub-devices
+exports.pushGatewayTelemetry = async (req, res, next) => {
+  try {
+    const accessToken = req.params.accessToken || req.headers['x-authorization'] || req.query.token;
+    const gateway = await Device.findOne({ where: { accessToken } });
+
+    if (!gateway) {
+      return res.status(401).json({ error: 'Invalid gateway access token.' });
+    }
+
+    let body = req.body;
+    if (typeof body === 'string') {
+      try { body = JSON.parse(body); } catch (e) { body = {}; }
+    }
+
+    if (!body || typeof body !== 'object') {
+      return res.status(400).json({ error: 'Invalid payload format. Expected JSON mapping sub-devices to telemetry.' });
+    }
+
+    const { processTelemetry } = require('../services/telemetryService');
+    const processedDevices = [];
+
+    for (const [subDeviceName, subData] of Object.entries(body)) {
+      if (!subDeviceName || typeof subData !== 'object') continue;
+
+      const [subDevice] = await Device.findOrCreate({
+        where: { name: subDeviceName, tenantId: gateway.tenantId },
+        defaults: {
+          name: subDeviceName,
+          type: 'sensor',
+          label: `Gateway Device (${gateway.name})`,
+          tenantId: gateway.tenantId,
+          customerId: gateway.customerId,
+          isActive: true,
+          additionalInfo: { gatewayId: gateway.id }
+        }
+      });
+
+      if (Array.isArray(subData)) {
+        for (const item of subData) {
+          const values = item.values || item;
+          const ts = item.ts ? new Date(item.ts).getTime() : Date.now();
+          await processTelemetry(subDevice.id, values, ts);
+        }
+      } else {
+        await processTelemetry(subDevice.id, subData, Date.now());
+      }
+      processedDevices.push(subDeviceName);
+    }
+
+    // Update gateway last activity
+    await gateway.update({ lastActivityTime: new Date(), isActive: true });
+
+    res.json({
+      message: 'Gateway telemetry processed successfully.',
+      gateway: gateway.name,
+      subDevicesCount: processedDevices.length,
+      devices: processedDevices
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
 exports.clearAllTelemetry = async (req, res, next) => {
   try {
     await Telemetry.destroy({ where: {}, truncate: true });
@@ -129,3 +193,4 @@ exports.clearAllTelemetry = async (req, res, next) => {
 };
 
 module.exports = exports;
+

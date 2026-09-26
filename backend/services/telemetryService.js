@@ -2,24 +2,39 @@ const db = require('../models');
 const wsServer = require('../websocket/wsServer');
 
 /**
- * Process incoming telemetry data — store, broadcast, and trigger alarm rules.
+ * Process incoming telemetry data — store, broadcast, evaluate alarms, and execute rule engine.
  */
 async function processTelemetry(entityId, data, timestamp = Date.now()) {
   const records = [];
 
   for (const [key, value] of Object.entries(data)) {
     if (key === 'ts' || key === 'token' || key === 'accessToken') continue;
-    const numericValue = parseFloat(value);
-    const isNum = !isNaN(numericValue);
-    const stringVal = typeof value === 'string' ? value : null;
+    
+    let numericValue = 0;
+    let stringVal = null;
 
-    if (!isNum && stringVal === null) continue;
+    if (typeof value === 'boolean') {
+      numericValue = value ? 1 : 0;
+      stringVal = value ? 'true' : 'false';
+    } else if (typeof value === 'number') {
+      numericValue = isNaN(value) ? 0 : value;
+      stringVal = String(value);
+    } else if (typeof value === 'string') {
+      const parsed = parseFloat(value);
+      numericValue = !isNaN(parsed) ? parsed : 0;
+      stringVal = value;
+    } else if (typeof value === 'object' && value !== null) {
+      numericValue = 0;
+      stringVal = JSON.stringify(value);
+    } else {
+      continue;
+    }
 
     records.push({
       entityId,
       entityType: 'DEVICE',
       key,
-      value: isNum ? numericValue : 0,
+      value: numericValue,
       stringValue: stringVal,
       timestamp: new Date(timestamp),
     });
@@ -31,20 +46,36 @@ async function processTelemetry(entityId, data, timestamp = Date.now()) {
   wsServer.broadcast(entityId, {
     type: 'TELEMETRY_UPDATE',
     entityId,
-    data: records.map(r => ({ key: r.key, value: r.value, ts: r.timestamp })),
+    data: records.map(r => ({
+      key: r.key,
+      value: r.value,
+      stringValue: r.stringValue,
+      ts: r.timestamp
+    })),
   });
 
   // Store in database
   const created = await db.Telemetry.bulkCreate(records);
 
-  // Update device last activity
+  // Update device last activity & mark active
   await db.Device.update(
     { lastActivityTime: new Date(), isActive: true },
     { where: { id: entityId } }
   );
 
-  // Evaluate alarm rules
+  // Evaluate preset alarm rules
   await evaluateAlarmRules(entityId, data);
+
+  // Execute Rule Engine pipeline if root rule chain exists
+  try {
+    const { executeRuleChain } = require('./ruleEngineService');
+    const device = await db.Device.findByPk(entityId, { attributes: ['tenantId'] });
+    if (device && device.tenantId) {
+      executeRuleChain(device.tenantId, entityId, data).catch(() => {});
+    }
+  } catch (reErr) {
+    // Ignore rule engine non-fatal errors
+  }
 
   return created;
 }

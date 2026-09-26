@@ -23,6 +23,7 @@ const integrationRoutes = require('./routes/integrations');
 const settingsRoutes = require('./routes/settings');
 const adminRoutes = require('./routes/admin');
 const userRoutes = require('./routes/users');
+const gatewayRoutes = require('./routes/gateways');
 
 const app = express();
 const PORT = process.env.PORT || 2004;
@@ -56,6 +57,8 @@ if (fs.existsSync(frontendDist)) {
 // API Routes
 app.all('/api/v1/:accessToken/telemetry', require('./controllers/telemetryController').pushByAccessToken);
 app.all('/api/telemetry/v1/:accessToken/telemetry', require('./controllers/telemetryController').pushByAccessToken);
+app.all('/api/v1/:accessToken/gateway/telemetry', require('./controllers/telemetryController').pushGatewayTelemetry);
+app.all('/api/v1/gateway/telemetry', require('./controllers/telemetryController').pushGatewayTelemetry);
 app.use('/api/auth', authRoutes);
 app.use('/api/devices', deviceRoutes);
 app.use('/api/assets', assetRoutes);
@@ -72,6 +75,7 @@ app.use('/api/integrations', integrationRoutes);
 app.use('/api/settings', settingsRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/users', userRoutes);
+app.use('/api/gateways', gatewayRoutes);
 
 // Health check
 app.get('/api/health', (req, res) => {

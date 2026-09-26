@@ -35,23 +35,27 @@ A fully functional IoT cloud platform inspired by [ThingsBoard Cloud](https://th
 
 ```bash
 # Install backend dependencies
-cd server
+cd backend
 npm install
 
 # Install frontend dependencies
-cd ../client
+cd ../frontend
 npm install
 ```
 
 ### 2. Start Development Servers
 
 ```bash
-# Terminal 1 — Backend (port 3001)
-cd server
+# Option A — Start both in one command (from root)
+npm run dev
+
+# Option B — Or in separate terminals
+# Terminal 1 — Backend & MQTT (port 2004 / 1883)
+cd backend
 npm run dev
 
 # Terminal 2 — Frontend (port 5173)
-cd client
+cd frontend
 npm run dev
 ```
 

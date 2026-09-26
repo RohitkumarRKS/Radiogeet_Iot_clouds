@@ -134,6 +134,41 @@ async function seed() {
       accessToken: 'mqtt_test_token_123',
       additionalInfo: { isSimulated: false, location: 'Test Lab' },
     },
+    {
+      id: 'gw-seed-alpha-001',
+      tenantId: tenant.id,
+      name: 'Industrial Modbus Gateway Alpha',
+      type: 'gateway',
+      label: 'Main Plant Floor RS485 / Ethernet Bridge',
+      deviceProfileId: profiles[2].id,
+      isGateway: true,
+      isActive: true,
+      accessToken: 'GW_MODBUS_ALPHA_01',
+      additionalInfo: {
+        protocolType: 'Modbus TCP / RTU',
+        ip: '192.168.1.120',
+        port: 502,
+        pollInterval: 5000,
+        baudRate: 9600,
+        description: 'Main Plant Floor RS485 Multi-drop Bus for Energy Meters',
+      },
+    },
+    {
+      id: uuidv4(),
+      tenantId: tenant.id,
+      name: 'Feeder Energy Meter #1',
+      type: 'energy_meter',
+      label: 'Main Feeder 3-Phase Meter (Slave ID 1)',
+      deviceProfileId: profiles[3].id,
+      isGateway: false,
+      isActive: true,
+      accessToken: 'METER_SUB_01_TOKEN',
+      additionalInfo: {
+        gatewayId: 'gw-seed-alpha-001',
+        modbusSlaveId: 1,
+        location: 'MCC Panel Room A',
+      },
+    },
   ]);
 
 

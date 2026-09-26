@@ -198,7 +198,112 @@ async function handlePublishPacket(socket, byte0, packet, headerOffset) {
       return;
     }
 
-    // Lookup device strictly by access token
+    // 1. Check ThingsBoard Gateway Topics
+    if (topic === 'v1/gateway/telemetry') {
+      const gateway = await Device.findOne({ where: { accessToken: targetToken } });
+      if (!gateway) {
+        console.warn(`⚠️ Gateway Telemetry Rejected: Invalid gateway token [${targetToken}]`);
+        return;
+      }
+      
+      // Expected ThingsBoard Gateway format:
+      // { "Device_A": [{"ts": 1711..., "values": { "v": 230 }}], "Device_B": { "temp": 25 } }
+      if (payload && typeof payload === 'object') {
+        for (const [subDeviceName, subData] of Object.entries(payload)) {
+          if (!subDeviceName || typeof subData !== 'object') continue;
+
+          const [subDevice] = await Device.findOrCreate({
+            where: { name: subDeviceName, tenantId: gateway.tenantId },
+            defaults: {
+              name: subDeviceName,
+              type: 'sensor',
+              label: `Gateway Device (${gateway.name})`,
+              tenantId: gateway.tenantId,
+              customerId: gateway.customerId,
+              isActive: true,
+              additionalInfo: { gatewayId: gateway.id }
+            }
+          });
+
+          if (Array.isArray(subData)) {
+            for (const item of subData) {
+              const values = item.values || item;
+              const ts = item.ts ? new Date(item.ts).getTime() : Date.now();
+              await processTelemetry(subDevice.id, values, ts);
+            }
+          } else {
+            await processTelemetry(subDevice.id, subData, Date.now());
+          }
+          console.log(`📡 Gateway [${gateway.name}] Processed Sub-Device [${subDeviceName}]`);
+        }
+      }
+      return;
+    }
+
+    if (topic === 'v1/gateway/connect') {
+      const gateway = await Device.findOne({ where: { accessToken: targetToken } });
+      if (!gateway) return;
+      const subDeviceName = payload.device || payload.name;
+      if (subDeviceName) {
+        const [subDevice] = await Device.findOrCreate({
+          where: { name: subDeviceName, tenantId: gateway.tenantId },
+          defaults: {
+            name: subDeviceName,
+            type: 'sensor',
+            label: `Gateway Device (${gateway.name})`,
+            tenantId: gateway.tenantId,
+            customerId: gateway.customerId,
+            isActive: true,
+            additionalInfo: { gatewayId: gateway.id }
+          }
+        });
+        await subDevice.update({ isActive: true });
+        console.log(`🔗 Gateway [${gateway.name}] Connected Sub-Device [${subDeviceName}]`);
+      }
+      return;
+    }
+
+    if (topic === 'v1/gateway/disconnect') {
+      const gateway = await Device.findOne({ where: { accessToken: targetToken } });
+      if (!gateway) return;
+      const subDeviceName = payload.device || payload.name;
+      if (subDeviceName) {
+        const subDevice = await Device.findOne({ where: { name: subDeviceName, tenantId: gateway.tenantId } });
+        if (subDevice) {
+          await subDevice.update({ isActive: false });
+          const wsServer = require('../websocket/wsServer');
+          wsServer.broadcast(subDevice.id, {
+            type: 'DEVICE_DISCONNECTED',
+            entityId: subDevice.id,
+            status: 'DISCONNECTED',
+            timestamp: new Date().toISOString()
+          });
+          console.log(`🔌 Gateway [${gateway.name}] Disconnected Sub-Device [${subDeviceName}]`);
+        }
+      }
+      return;
+    }
+
+    // 2. Check RPC Response Topic: v1/devices/me/rpc/response/:requestId
+    const rpcResponseMatch = topic.match(/^v1\/devices\/(?:me|[a-zA-Z0-9_\-]+)\/rpc\/response\/([a-zA-Z0-9_\-]+)$/);
+    if (rpcResponseMatch) {
+      const requestId = rpcResponseMatch[1];
+      const device = await Device.findOne({ where: { accessToken: targetToken } });
+      if (device) {
+        const wsServer = require('../websocket/wsServer');
+        wsServer.broadcast(device.id, {
+          type: 'RPC_RESPONSE_RECEIVED',
+          entityId: device.id,
+          requestId,
+          response: payload,
+          timestamp: new Date().toISOString()
+        });
+        console.log(`📥 RPC Response for Device [${device.name}] (Req: ${requestId}):`, payload);
+      }
+      return;
+    }
+
+    // 3. Standard Direct Device Telemetry
     const device = await Device.findOne({ where: { accessToken: targetToken } });
 
     if (!device) {
@@ -273,6 +378,29 @@ function startMqttServer() {
         } else if (packetType === 14) {
           // DISCONNECT
           socket.end();
+        }
+      }
+    });
+
+    socket.on('close', async () => {
+      if (socket.clientToken) {
+        connectedSockets.delete(socket.clientToken);
+        try {
+          const device = await Device.findOne({ where: { accessToken: socket.clientToken } });
+          if (device) {
+            await device.update({ isActive: false });
+            const wsServer = require('../websocket/wsServer');
+            wsServer.broadcast(device.id, {
+              type: 'DEVICE_DISCONNECTED',
+              entityId: device.id,
+              deviceName: device.name,
+              status: 'DISCONNECTED',
+              timestamp: new Date().toISOString()
+            });
+            console.log(`🔌 MQTT Device Disconnected [${device.name}] -> Status OFFLINE (Telemetry -> 0)`);
+          }
+        } catch (e) {
+          console.error('Error handling device disconnect:', e.message);
         }
       }
     });

@@ -84,7 +84,7 @@ export default function DashboardView() {
             Object.values(grouped).forEach(arr => arr.forEach(p => allTs.add(p.ts)));
             const sorted = [...allTs].sort();
             const maxTs = sorted.length > 0 ? sorted[sorted.length - 1] : 0;
-            const isFresh = maxTs > 0 && (Date.now() - maxTs < 5000);
+            const isRecent = maxTs > 0 && (Date.now() - maxTs < 30000);
 
             const chartData = sorted.map(ts => {
               const point = { ts, time: new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }) };
@@ -95,10 +95,10 @@ export default function DashboardView() {
               return point;
             });
 
-            // If latest DB reading is older than 5s (device inactive/off), set live raw values to 0
+            // If latest DB reading is recent, keep live values; if older than 30s (device inactive/off), show 0
             const liveRaw = {};
             Object.entries(grouped).forEach(([key, arr]) => {
-              if (isFresh && arr && arr.length > 0) {
+              if (isRecent && arr && arr.length > 0) {
                 liveRaw[key] = arr;
               } else {
                 liveRaw[key] = [{ value: 0, ts: Date.now() }];
@@ -110,7 +110,8 @@ export default function DashboardView() {
               [eid]: {
                 raw: liveRaw,
                 chart: chartData,
-                lastUpdated: isFresh ? maxTs : null
+                lastUpdated: isRecent ? maxTs : null,
+                isDisconnected: !isRecent
               }
             }));
           }).catch(() => {});
@@ -129,6 +130,28 @@ export default function DashboardView() {
     const entityIds = [...new Set(widgets.filter(w => w.config?.entityId).map(w => w.config.entityId))];
 
     const handleTelemetryUpdate = (event) => {
+      // 1. Instant Disconnect Handler: If hardware disconnects, immediately zero out values
+      if (event.type === 'DEVICE_DISCONNECTED' && event.entityId) {
+        const eid = event.entityId;
+        setTelemetryData(prev => {
+          const existing = prev[eid] || { raw: {}, chart: [] };
+          const resetRaw = {};
+          Object.keys(existing.raw || {}).forEach(k => {
+            resetRaw[k] = [{ value: 0, ts: Date.now() }];
+          });
+          return {
+            ...prev,
+            [eid]: {
+              ...existing,
+              raw: resetRaw,
+              isDisconnected: true,
+              lastUpdated: null
+            }
+          };
+        });
+        return;
+      }
+
       if (event.type !== 'TELEMETRY_UPDATE' || !event.entityId || !Array.isArray(event.data) || event.data.length === 0) return;
 
       const eid = event.entityId;
@@ -144,7 +167,7 @@ export default function DashboardView() {
           const itemTs = item.ts ? new Date(item.ts).getTime() : ts;
           const val = typeof item.value === 'number' ? item.value : (isNaN(parseFloat(item.value)) ? item.value : parseFloat(item.value));
           const currentArr = updatedRaw[item.key] || [];
-          updatedRaw[item.key] = [...currentArr, { value: val, ts: itemTs }];
+          updatedRaw[item.key] = [...currentArr, { value: val, stringValue: item.stringValue, ts: itemTs }];
         });
 
         // 2. Update time-series chart points for Line, Bar, Area charts
@@ -173,7 +196,8 @@ export default function DashboardView() {
           [eid]: {
             raw: updatedRaw,
             chart: updatedChart,
-            lastUpdated: Date.now()
+            lastUpdated: Date.now(),
+            isDisconnected: false
           }
         };
       });
@@ -183,7 +207,7 @@ export default function DashboardView() {
     const unsubscribes = entityIds.map(eid => subscribe(eid, handleTelemetryUpdate));
     const unsubGlobal = subscribe('__global__', handleTelemetryUpdate);
 
-    // Instant Inactivity Watchdog: TURANT reset active values to 0 when telemetry stream stops (> 3s silence)
+    // Inactivity Watchdog: If no telemetry packet received for over 20 seconds, zero out values
     const watchdogInterval = setInterval(() => {
       const now = Date.now();
       setTelemetryData((prev) => {
@@ -192,10 +216,10 @@ export default function DashboardView() {
 
         Object.keys(nextState).forEach((eid) => {
           const entityData = nextState[eid];
-          if (!entityData || !entityData.lastUpdated) return;
+          if (!entityData || !entityData.lastUpdated || entityData.isDisconnected) return;
 
-          // TURANT reset to 0 if no telemetry packet received for over 3 seconds (ESP32 disconnected / silent)
-          if (now - entityData.lastUpdated > 3000) {
+          // If no telemetry packet received for 20 seconds (device offline/silent)
+          if (now - entityData.lastUpdated > 20000) {
             const resetRaw = {};
             if (entityData.raw) {
               Object.keys(entityData.raw).forEach((k) => {
@@ -205,6 +229,7 @@ export default function DashboardView() {
             nextState[eid] = {
               ...entityData,
               raw: resetRaw,
+              isDisconnected: true,
               lastUpdated: null,
             };
             hasChanges = true;
@@ -213,7 +238,7 @@ export default function DashboardView() {
 
         return hasChanges ? nextState : prev;
       });
-    }, 500);
+    }, 1000);
 
     return () => {
       unsubscribes.forEach(unsub => unsub && unsub());

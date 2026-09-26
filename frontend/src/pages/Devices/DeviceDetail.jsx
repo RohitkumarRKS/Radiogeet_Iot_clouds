@@ -119,13 +119,28 @@ export default function DeviceDetail() {
     let lastTs = null;
 
     const unsubscribe = subscribe(id, (event) => {
+      // 1. Instant Disconnect Handler: If hardware disconnects, immediately zero out values and mark inactive
+      if (event.type === 'DEVICE_DISCONNECTED' && event.entityId === id) {
+        setLatestTelemetry(prev => prev.map(t => ({ ...t, value: 0 })));
+        setDevice(prev => prev ? ({ ...prev, isActive: false }) : prev);
+        lastTs = null;
+        return;
+      }
+
       if (event.type === 'TELEMETRY_UPDATE' && Array.isArray(event.data)) {
         lastTs = Date.now();
+        setDevice(prev => prev ? ({ ...prev, isActive: true }) : prev);
+
         setLatestTelemetry((prev) => {
           const next = [...prev];
           event.data.forEach((item) => {
             const idx = next.findIndex((t) => t.key === item.key);
-            const newEntry = { key: item.key, value: item.value, timestamp: item.ts || new Date().toISOString() };
+            const newEntry = {
+              key: item.key,
+              value: item.value,
+              stringValue: item.stringValue,
+              timestamp: item.ts || new Date().toISOString()
+            };
             if (idx !== -1) {
               next[idx] = newEntry;
             } else {
@@ -146,12 +161,14 @@ export default function DeviceDetail() {
       }
     });
 
+    // Inactivity watchdog: If no data received for 20 seconds, zero out values & mark inactive
     const watchdog = setInterval(() => {
-      if (lastTs && Date.now() - lastTs > 3000) {
+      if (lastTs && Date.now() - lastTs > 20000) {
         setLatestTelemetry(prev => prev.map(t => ({ ...t, value: 0 })));
+        setDevice(prev => prev ? ({ ...prev, isActive: false }) : prev);
         lastTs = null;
       }
-    }, 500);
+    }, 1000);
 
     return () => {
       if (unsubscribe) unsubscribe();

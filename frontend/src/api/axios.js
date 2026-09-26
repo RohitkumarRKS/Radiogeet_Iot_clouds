@@ -1,9 +1,14 @@
 import axios from 'axios';
 
 const getApiBase = () => {
-  const host = (typeof window !== 'undefined' && window.location.hostname) ? window.location.hostname : 'localhost';
-  const protocol = (typeof window !== 'undefined' && window.location.protocol) ? window.location.protocol : 'http:';
-  return `${protocol}//${host}:2004/api`;
+  if (typeof window === 'undefined') return 'http://localhost:2004/api';
+  const { protocol, hostname, port } = window.location;
+  // If running in Vite development mode on port 5173, point to backend on port 2004
+  if (port === '5173') {
+    return `${protocol}//${hostname}:2004/api`;
+  }
+  // When built and served via backend (port 2004) or behind Nginx (port 80/443), use current origin
+  return `${protocol}//${hostname}${port ? `:${port}` : ''}/api`;
 };
 
 const API_BASE = getApiBase();
