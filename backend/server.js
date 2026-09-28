@@ -241,7 +241,7 @@ async function start() {
       }
     }
 
-    if (!synced) {
+    if (!synced && forceSync) {
       // Force sync: disable FK, drop all, recreate
       try { await sequelize.query('PRAGMA foreign_keys = OFF;'); } catch (e) {}
       await sequelize.sync({ force: true });

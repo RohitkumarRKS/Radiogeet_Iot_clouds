@@ -3,7 +3,7 @@
  * Periodically deletes historical telemetry data older than the configured retention threshold (telemetryRetentionDays).
  */
 const { Op } = require('sequelize');
-const { TelemetryData, Telemetry, Settings, AuditLog } = require('../models');
+const { Telemetry, Setting, AuditLog } = require('../models');
 
 // Default purge interval: 24 hours (in milliseconds)
 const PURGE_INTERVAL_MS = 24 * 60 * 60 * 1000;
@@ -11,7 +11,7 @@ const PURGE_INTERVAL_MS = 24 * 60 * 60 * 1000;
 async function purgeOldTelemetry() {
   try {
     // 1. Fetch configured retention days from system settings
-    const settings = await Settings.findOne();
+    const settings = Setting ? await Setting.findOne() : null;
     const retentionDays = settings && settings.telemetryRetentionDays ? settings.telemetryRetentionDays : 30;
 
     if (retentionDays <= 0) {
@@ -22,20 +22,7 @@ async function purgeOldTelemetry() {
     const cutoffDate = new Date(Date.now() - retentionDays * 24 * 60 * 60 * 1000);
     console.log(`🧹 Running Telemetry Auto-Purge: Deleting telemetry data older than ${retentionDays} days (before ${cutoffDate.toISOString()})...`);
 
-    let purgedDataCount = 0;
     let purgedTelemetryCount = 0;
-
-    // 2. Purge TelemetryData records older than cutoffDate
-    if (TelemetryData) {
-      purgedDataCount = await TelemetryData.destroy({
-        where: {
-          [Op.or]: [
-            { timestamp: { [Op.lt]: cutoffDate } },
-            { createdAt: { [Op.lt]: cutoffDate } },
-          ],
-        },
-      });
-    }
 
     // 3. Purge Telemetry records older than cutoffDate
     if (Telemetry) {
@@ -49,8 +36,8 @@ async function purgeOldTelemetry() {
       });
     }
 
-    const totalPurged = purgedDataCount + purgedTelemetryCount;
-    console.log(`✅ Telemetry Auto-Purge Complete: Deleted ${totalPurged} old records (${purgedDataCount} data points, ${purgedTelemetryCount} telemetry events).`);
+    const totalPurged = purgedTelemetryCount;
+    console.log(`✅ Telemetry Auto-Purge Complete: Deleted ${totalPurged} old records (${purgedTelemetryCount} telemetry events).`);
 
     // 4. Log to AuditLog if records were purged
     if (totalPurged > 0 && AuditLog) {

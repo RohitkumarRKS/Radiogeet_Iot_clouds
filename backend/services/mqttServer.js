@@ -144,6 +144,7 @@ async function handlePublishPacket(socket, byte0, packet, headerOffset) {
     if (offset + topicLen > packet.length) return;
     const topic = packet.toString('utf8', offset, offset + topicLen);
     offset += topicLen;
+    console.log(`📥 MQTT Packet Received [${topic}]:`, packet.toString('utf8', offset));
 
     // Packet Identifier (2 bytes BE, if QoS > 0)
     let packetId = null;
@@ -184,7 +185,7 @@ async function handlePublishPacket(socket, byte0, packet, headerOffset) {
       }
     }
 
-    // Resolve target access token
+    // Resolve target access token or device identifier
     let targetToken = socket.clientToken;
 
     // Check if topic contains explicit token: v1/devices/:token/telemetry
@@ -193,15 +194,47 @@ async function handlePublishPacket(socket, byte0, packet, headerOffset) {
       targetToken = topicMatch[1];
     }
 
-    if (payload && (payload.token || payload.accessToken)) {
-      targetToken = payload.token || payload.accessToken;
-      delete payload.token;
-      delete payload.accessToken;
+    if (payload && typeof payload === 'object') {
+      if (payload.token || payload.accessToken) {
+        targetToken = payload.token || payload.accessToken;
+        delete payload.token;
+        delete payload.accessToken;
+      }
+      if (!targetToken && payload.values && typeof payload.values === 'object') {
+        targetToken = payload.values.token || payload.values.accessToken || payload.values.ID || payload.values.id;
+      }
+      if (!targetToken && (payload.ID || payload.id)) {
+        targetToken = payload.ID || payload.id;
+      }
+    }
+
+    // Fallback: If still no token and there is an IMEI in payload, match device
+    if (!targetToken && payload && typeof payload === 'object') {
+      const imei = payload.IMEI || (payload.values && payload.values.IMEI);
+      if (imei) {
+        const { Op } = require('sequelize');
+        const devByImei = await Device.findOne({
+          where: {
+            [Op.or]: [
+              { label: { [Op.like]: `%${imei}%` } },
+              { name: { [Op.like]: `%${imei}%` } },
+              { accessToken: { [Op.like]: `%${imei}%` } }
+            ]
+          }
+        });
+        if (devByImei) targetToken = devByImei.accessToken;
+      }
     }
 
     if (!targetToken) {
-      console.warn(`⚠️ MQTT Telemetry Rejected: No device access token provided in CONNECT, topic, or payload [${topic}].`);
-      return;
+      console.warn(`⚠️ MQTT Telemetry: No explicit device token in topic [${topic}]. Checking for registered gateway...`);
+      const singleGw = await Device.findOne({ where: { isGateway: true }, order: [['updatedAt', 'DESC']] });
+      if (singleGw) {
+        targetToken = singleGw.accessToken;
+        console.log(`ℹ️ Auto-associated telemetry with gateway [${singleGw.name}]`);
+      } else {
+        return;
+      }
     }
 
     // 1. Check ThingsBoard Gateway Topics
@@ -309,8 +342,16 @@ async function handlePublishPacket(socket, byte0, packet, headerOffset) {
       return;
     }
 
-    // 3. Standard Direct Device Telemetry
-    const device = await Device.findOne({ where: { accessToken: targetToken } });
+    // 3. Standard Direct Device Telemetry (Match by accessToken OR device name)
+    const { Op } = require('sequelize');
+    const device = await Device.findOne({
+      where: {
+        [Op.or]: [
+          { accessToken: targetToken },
+          { name: targetToken }
+        ]
+      }
+    });
 
     if (!device) {
       console.warn(`⚠️ MQTT Telemetry Rejected: Invalid device access token [${targetToken}].`);
@@ -541,7 +582,7 @@ function startMqttBridgeClient() {
   const connectPacket = Buffer.concat([connectHeader, clientIdBuf]);
 
   try {
-    const clientSocket = net.connect({ host: '::1', port: MQTT_PORT }, () => {
+    const clientSocket = net.connect({ host: '127.0.0.1', port: MQTT_PORT }, () => {
       clientSocket.write(connectPacket);
     });
 
@@ -580,16 +621,16 @@ function startMqttBridgeClient() {
 
         if (packetType === 2) {
           // CONNACK received from external broker
-          console.log(`✅ Connected to external MQTT broker on port ${MQTT_PORT}. Subscribing to telemetry topics...`);
-          const sub1 = buildSubscribePacket(1, 'v1/devices/+/telemetry');
-          clientSocket.write(sub1);
-          const sub2 = buildSubscribePacket(2, 'v1/devices/me/telemetry');
-          clientSocket.write(sub2);
-          const sub3 = buildSubscribePacket(3, 'v1/devices/#');
-          clientSocket.write(sub3);
+          console.log(`✅ Connected to external MQTT broker on port ${MQTT_PORT}. Subscribing to v1/# ...`);
+          const sub = buildSubscribePacket(1, 'v1/#');
+          clientSocket.write(sub);
         } else if (packetType === 3) {
           // PUBLISH received from external broker!
+          console.log(`📡 Bridge client received PUBLISH packet (len: ${totalPacketLength})`);
           await handlePublishPacket(clientSocket, byte0, packet, headerLength);
+        } else if (packetType === 9) {
+          // SUBACK
+          console.log(`✅ Bridge successfully subscribed to v1/# on MQTT broker.`);
         } else if (packetType === 13) {
           // PINGRESP from external broker
         }
