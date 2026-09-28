@@ -2636,7 +2636,7 @@ function RenderBundlePreview({ bundleId }) {
       return (
         <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 4 }}>
           <div style={{ width: '90%', background: '#FFF', borderRadius: 6, border: '1px solid #E2E8F0', padding: 6, display: 'flex', flexDirection: 'column', gap: 4 }}>
-             <div style={{ fontSize: 6, fontWeight: 700, color: '#64748B' }}>THINGSBOARD STORAGE</div>
+             <div style={{ fontSize: 6, fontWeight: 700, color: '#64748B' }}>RADIOGEET STORAGE</div>
              <div style={{ display: 'flex', gap: 4 }}>
                 <div style={{ flex: 1, height: 10, border: '1px solid #CBD5E1', borderRadius: 2 }} />
                 <div style={{ flex: 1, height: 10, border: '1px solid #CBD5E1', borderRadius: 2 }} />
@@ -3950,7 +3950,7 @@ function RenderWidgetPreview({ type, category }) {
         <div style={{ width: '100%', height: '100%', padding: '0 10px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
           <div style={{ width: '100%', height: '80%', background: '#000', borderRadius: 4, padding: '12px', display: 'flex', flexDirection: 'column', gap: 8, fontFamily: 'monospace', fontSize: 9 }}>
             <div style={{ color: '#FFF', fontWeight: 700, fontSize: 11 }}>RPC debug terminal</div>
-            <div style={{ color: '#94A3B8' }}>Welcome to ThingsBoard<br/>RPC debug terminal.</div>
+            <div style={{ color: '#94A3B8' }}>Welcome to RadioGeet<br/>RPC debug terminal.</div>
             <div style={{ color: '#EF4444', fontWeight: 700 }}>No RPC target detected!</div>
           </div>
         </div>
@@ -3961,7 +3961,7 @@ function RenderWidgetPreview({ type, category }) {
         <div style={{ width: '100%', height: '100%', padding: '0 10px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
           <div style={{ width: '100%', height: '80%', background: '#000', borderRadius: 4, padding: '12px', display: 'flex', flexDirection: 'column', gap: 8, fontFamily: 'monospace', fontSize: 9 }}>
             <div style={{ color: '#FFF', fontWeight: 700, fontSize: 11 }}>RPC remote shell</div>
-            <div style={{ color: '#94A3B8' }}>Welcome to ThingsBoard<br/>RPC remote shell.</div>
+            <div style={{ color: '#94A3B8' }}>Welcome to RadioGeet<br/>RPC remote shell.</div>
             <div style={{ color: '#EF4444', fontWeight: 700 }}>Target device is not<br/>set!</div>
           </div>
         </div>
@@ -4463,7 +4463,7 @@ function RenderWidgetPreview({ type, category }) {
       return (
         <div style={{ width: '100%', height: '100%', background: '#FFF', padding: 16, display: 'flex', flexDirection: 'column' }}>
           <div style={{ border: '1px solid #CBD5E1', padding: '8px 10px', fontSize: 11, color: '#475569', fontWeight: 600, display: 'flex', justifyContent: 'space-between', borderRadius: 4, marginBottom: 12 }}>
-            THINGSBOARD <span style={{fontSize:9}}>▼</span>
+            RADIOGEET <span style={{fontSize:9}}>▼</span>
           </div>
           <div style={{ borderBottom: '1px solid #94A3B8', paddingBottom: 4, fontSize: 11, color: '#94A3B8', marginBottom: 16 }}>Gateway name</div>
           <div style={{ alignSelf: 'flex-end', fontSize: 11, color: '#FFF', background: '#284E7B', fontWeight: 700, padding: '6px 16px', borderRadius: 2, marginTop: 'auto' }}>Save</div>
@@ -4516,7 +4516,7 @@ function RenderWidgetPreview({ type, category }) {
       return (
         <div style={{ width: '100%', height: '100%', background: '#FFF', padding: 16, display: 'flex', flexDirection: 'column' }}>
           <div style={{ border: '1px solid #CBD5E1', padding: '6px 8px', fontSize: 11, color: '#475569', fontWeight: 600, display: 'flex', justifyContent: 'space-between', borderRadius: 4, marginBottom: 8 }}>
-            THINGSBOARD <span style={{fontSize:9}}>▼</span>
+            RADIOGEET <span style={{fontSize:9}}>▼</span>
           </div>
           <div style={{ fontSize: 9, color: '#94A3B8', marginBottom: 2 }}>Gateway name *</div>
           <div style={{ borderBottom: '1px solid #94A3B8', paddingBottom: 2, fontSize: 13, color: '#334155', display: 'flex', justifyContent: 'space-between', marginBottom: 12 }}>

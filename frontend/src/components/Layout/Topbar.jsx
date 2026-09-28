@@ -48,9 +48,11 @@ export default function Topbar({ sidebarCollapsed, onMenuToggle }) {
   const dropdownRef = useRef(null);
 
   const currentTitle = routeTitles[location.pathname] ||
-    location.pathname.split('/').filter(Boolean).map(
-      s => s.charAt(0).toUpperCase() + s.slice(1).replace(/-/g, ' ')
-    ).join(' / ');
+    location.pathname.split('/').filter(Boolean).map(s => {
+      const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s);
+      if (isUuid) return 'Details';
+      return s.charAt(0).toUpperCase() + s.slice(1).replace(/-/g, ' ');
+    }).join(' / ');
 
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [currentPlan, setCurrentPlan] = useState('Free');

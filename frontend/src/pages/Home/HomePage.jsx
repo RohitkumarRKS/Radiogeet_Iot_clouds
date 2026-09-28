@@ -655,7 +655,7 @@ export default function HomePage() {
             <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
               <AlertTriangle size={18} style={{ color: '#EF4444' }} />
               <span className="card-title" style={{ fontWeight: 700, fontSize: 'var(--font-size-base)' }}>
-                ThingsBoard Cloud Alarms Stream
+                RadioGeet Cloud Alarms Stream
               </span>
             </div>
             <button className="btn btn-ghost btn-sm" onClick={() => navigate('/alarms')} style={{ fontSize: 'var(--font-size-xs)' }}>

@@ -35,7 +35,7 @@ export default function EdgeInstanceList() {
       <div className="page-header">
         <div>
           <h1 className="page-title">Edge Instances</h1>
-          <p className="page-subtitle">Manage decentralized ThingsBoard Edge computing nodes and local rule engine sync</p>
+          <p className="page-subtitle">Manage decentralized RadioGeet Edge computing nodes and local rule engine sync</p>
         </div>
         <button className="btn btn-primary" onClick={() => setShowModal(true)}><Plus size={16} /> Add Edge Instance</button>
       </div>

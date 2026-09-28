@@ -5,39 +5,51 @@ const wsServer = require('../websocket/wsServer');
  * Process incoming telemetry data — store, broadcast, evaluate alarms, and execute rule engine.
  */
 async function processTelemetry(entityId, data, timestamp = Date.now()) {
+  if (!data) return [];
   const records = [];
 
-  for (const [key, value] of Object.entries(data)) {
-    if (key === 'ts' || key === 'token' || key === 'accessToken') continue;
-    
-    let numericValue = 0;
-    let stringVal = null;
+  const items = Array.isArray(data) ? data : [data];
 
-    if (typeof value === 'boolean') {
-      numericValue = value ? 1 : 0;
-      stringVal = value ? 'true' : 'false';
-    } else if (typeof value === 'number') {
-      numericValue = isNaN(value) ? 0 : value;
-      stringVal = String(value);
-    } else if (typeof value === 'string') {
-      const parsed = parseFloat(value);
-      numericValue = !isNaN(parsed) ? parsed : 0;
-      stringVal = value;
-    } else if (typeof value === 'object' && value !== null) {
-      numericValue = 0;
-      stringVal = JSON.stringify(value);
-    } else {
-      continue;
+  for (const item of items) {
+    if (!item || typeof item !== 'object') continue;
+
+    const itemTs = item.ts ? new Date(item.ts).getTime() : timestamp;
+    const kvSource = (item.values && typeof item.values === 'object' && !Array.isArray(item.values))
+      ? item.values
+      : item;
+
+    for (const [key, value] of Object.entries(kvSource)) {
+      if (key === 'ts' || key === 'token' || key === 'accessToken' || key === 'values') continue;
+      
+      let numericValue = 0;
+      let stringVal = null;
+
+      if (typeof value === 'boolean') {
+        numericValue = value ? 1 : 0;
+        stringVal = value ? 'true' : 'false';
+      } else if (typeof value === 'number') {
+        numericValue = isNaN(value) ? 0 : value;
+        stringVal = String(value);
+      } else if (typeof value === 'string') {
+        const parsed = parseFloat(value);
+        numericValue = !isNaN(parsed) ? parsed : 0;
+        stringVal = value;
+      } else if (typeof value === 'object' && value !== null) {
+        numericValue = 0;
+        stringVal = JSON.stringify(value);
+      } else {
+        continue;
+      }
+
+      records.push({
+        entityId,
+        entityType: 'DEVICE',
+        key,
+        value: numericValue,
+        stringValue: stringVal,
+        timestamp: new Date(itemTs),
+      });
     }
-
-    records.push({
-      entityId,
-      entityType: 'DEVICE',
-      key,
-      value: numericValue,
-      stringValue: stringVal,
-      timestamp: new Date(timestamp),
-    });
   }
 
   if (records.length === 0) return [];
@@ -58,10 +70,22 @@ async function processTelemetry(entityId, data, timestamp = Date.now()) {
   const created = await db.Telemetry.bulkCreate(records);
 
   // Update device last activity & mark active
+  const now = new Date();
   await db.Device.update(
-    { lastActivityTime: new Date(), isActive: true },
+    { lastActivityTime: now, isActive: true },
     { where: { id: entityId } }
   );
+
+  // Broadcast active status to all open screens (DeviceList, Dashboard, etc.)
+  if (typeof wsServer.broadcastAll === 'function') {
+    wsServer.broadcastAll({
+      type: 'DEVICE_STATUS_UPDATE',
+      entityId,
+      isActive: true,
+      status: 'ONLINE',
+      lastActivityTime: now.toISOString()
+    });
+  }
 
   // Evaluate preset alarm rules
   await evaluateAlarmRules(entityId, data);

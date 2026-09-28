@@ -27,8 +27,21 @@ exports.getAll = async (req, res, next) => {
       order: [['createdAt', 'DESC']],
     });
 
+    const now = Date.now();
+    const formattedRows = rows.map((device) => {
+      const isOnline = Boolean(
+        device.isActive &&
+        device.lastActivityTime &&
+        (now - new Date(device.lastActivityTime).getTime() < 60000)
+      );
+      const devJson = device.toJSON();
+      devJson.isActive = isOnline;
+      devJson.status = isOnline ? 'ONLINE' : 'OFFLINE';
+      return devJson;
+    });
+
     res.json({
-      data: rows,
+      data: formattedRows,
       totalElements: count,
       totalPages: Math.ceil(count / pageSize),
       hasNext: (parseInt(page) + 1) * parseInt(pageSize) < count,
@@ -53,7 +66,30 @@ exports.getById = async (req, res, next) => {
       ],
     });
     if (!device) return res.status(404).json({ error: 'Device not found.' });
-    res.json(device);
+
+    const now = Date.now();
+    const isOnline = Boolean(
+      device.isActive &&
+      device.lastActivityTime &&
+      (now - new Date(device.lastActivityTime).getTime() < 60000)
+    );
+
+    const devJson = device.toJSON();
+    devJson.isActive = isOnline;
+    devJson.status = isOnline ? 'ONLINE' : 'OFFLINE';
+
+    // If attached to a Gateway, attach gateway details
+    if (device.additionalInfo?.gatewayId) {
+      const parentGateway = await Device.findByPk(device.additionalInfo.gatewayId, {
+        attributes: ['id', 'name', 'label']
+      });
+      if (parentGateway) {
+        devJson.gatewayName = parentGateway.name;
+        devJson.gatewayLabel = parentGateway.label;
+      }
+    }
+
+    res.json(devJson);
   } catch (error) {
     next(error);
   }

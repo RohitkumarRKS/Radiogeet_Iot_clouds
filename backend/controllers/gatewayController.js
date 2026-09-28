@@ -18,6 +18,9 @@ exports.getAll = async (req, res, next) => {
 
     const gateways = await Device.findAll({
       where,
+      include: [
+        { model: DeviceProfile, attributes: ['id', 'name', 'type'] },
+      ],
       order: [['createdAt', 'DESC']],
     });
 
@@ -38,6 +41,8 @@ exports.getAll = async (req, res, next) => {
       return {
         id: gw.id,
         name: gw.name,
+        deviceProfile: gw.DeviceProfile?.name || 'Smart Gateway',
+        deviceProfileId: gw.deviceProfileId,
         label: gw.label || gw.name,
         type: info.protocolType || gw.type || 'Modbus Gateway',
         protocolType: info.protocolType || 'Modbus TCP / RTU',
@@ -198,17 +203,30 @@ exports.getById = async (req, res, next) => {
  */
 exports.create = async (req, res, next) => {
   try {
-    const { name, protocolType, ip, port, pollInterval, baudRate, description, gatewayConfig } = req.body;
+    const { name, protocolType, ip, port, pollInterval, baudRate, description, gatewayConfig, deviceProfileId } = req.body;
     const tenantId = req.user.tenantId;
 
     if (!name || !name.trim()) {
       return res.status(400).json({ error: 'Gateway name is required.' });
     }
 
-    // Find default gateway profile if exists
-    const profile = await DeviceProfile.findOne({
-      where: { tenantId, type: 'GATEWAY' },
-    });
+    // Find requested profile or default gateway profile
+    let profile = null;
+    if (deviceProfileId) {
+      profile = await DeviceProfile.findOne({
+        where: { id: deviceProfileId, tenantId },
+      });
+    }
+    if (!profile) {
+      profile = await DeviceProfile.findOne({
+        where: { tenantId, type: 'GATEWAY' },
+      });
+    }
+    if (!profile) {
+      profile = await DeviceProfile.findOne({
+        where: { tenantId },
+      });
+    }
 
     const token = (gatewayConfig?.security?.accessToken && gatewayConfig.security.accessToken.trim())
       ? gatewayConfig.security.accessToken.trim()
@@ -216,7 +234,7 @@ exports.create = async (req, res, next) => {
 
     const gateway = await Device.create({
       name: name.trim(),
-      label: description || `${protocolType || 'Modbus'} Edge Gateway`,
+      label: description || (profile ? `${profile.name} Gateway` : `${protocolType || 'Modbus'} Edge Gateway`),
       type: 'gateway',
       isGateway: true,
       isActive: false, // Starts OFFLINE until physical gateway makes first connection

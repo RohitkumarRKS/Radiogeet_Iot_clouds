@@ -780,7 +780,7 @@ export default function DashboardWidgetGrid({
                 <div className="widget" style={{ flex: 1, display: 'flex', flexDirection: 'column', background: '#FFF', padding: '16px', height: '100%' }}>
                   <WidgetHeader title={widget.title} color={color} />
                   <div className="widget-body" style={{ flex: 1, minHeight: 100, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#64748B', padding: 16, fontSize: 12 }}>
-                    ThingsBoard Custom Widget ({widget.type})
+                    RadioGeet Custom Widget ({widget.type})
                   </div>
                 </div>
               );

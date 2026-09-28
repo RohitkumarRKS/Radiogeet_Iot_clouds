@@ -1,7 +1,7 @@
 @echo off
-title CloudBoard IIoT Platform Launcher
+title RadioGeet IoT Cloud Platform Launcher
 echo ===================================================
-echo   Starting CloudBoard IIoT Platform...
+echo   Starting RadioGeet IoT Cloud Platform...
 echo ===================================================
 echo.
 
@@ -49,7 +49,7 @@ start "" "http://localhost:2004"
 
 echo.
 echo ===================================================
-echo   CloudBoard is running at http://localhost:2004
+echo   RadioGeet IoT Cloud is running at http://localhost:2004
 echo   MQTT Broker listening on port 1883
 echo ===================================================
 echo.

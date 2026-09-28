@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import {
   Network, Plus, Trash2, Search, RotateCw, Settings, Terminal,
   Lock, Copy, Check, Eye, X, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight,
-  Server, Shield, Radio, ArrowUpRight
+  Server, Shield, Radio, ArrowUpRight, ChevronDown
 } from 'lucide-react';
 import api from '../../api/axios';
 import { useToast } from '../../context/ToastContext';
@@ -42,14 +42,12 @@ export default function GatewayList() {
     'Type "help" for a list of available diagnostic commands.\n'
   ]);
 
-  // Add Gateway Form State
+  // Profiles & Add Gateway Form State (Matching ThingsBoard Cloud Gateway modal)
+  const [profiles, setProfiles] = useState([]);
+  const [creatingGateway, setCreatingGateway] = useState(false);
   const [form, setForm] = useState({
     name: '',
-    protocolType: 'Modbus TCP / RTU',
-    ip: '192.168.1.120',
-    port: '502',
-    pollInterval: '5000',
-    description: '',
+    deviceProfileId: '',
   });
 
   // User Brand Colors
@@ -70,8 +68,26 @@ export default function GatewayList() {
     }
   };
 
+  const loadProfiles = async () => {
+    try {
+      const res = await api.get('/devices/profiles');
+      const profileList = res.data?.data || res.data || [];
+      setProfiles(profileList);
+      const gwProfile = profileList.find(p => p.type === 'GATEWAY' || p.name?.toLowerCase().includes('gateway')) || profileList[0];
+      if (gwProfile) {
+        setForm(prev => ({
+          ...prev,
+          deviceProfileId: prev.deviceProfileId || gwProfile.id,
+        }));
+      }
+    } catch (err) {
+      console.error('Failed to load device profiles:', err);
+    }
+  };
+
   useEffect(() => {
     loadGateways();
+    loadProfiles();
   }, []);
 
   // Real-time synchronization
@@ -88,38 +104,30 @@ export default function GatewayList() {
     };
   }, [subscribe]);
 
-  const handleProtocolChange = (protocol) => {
-    let defaultPort = '502';
-    if (protocol.includes('OPC-UA')) defaultPort = '4840';
-    if (protocol.includes('BACnet')) defaultPort = '47808';
-    if (protocol.includes('MQTT')) defaultPort = '1883';
-    if (protocol.includes('CAN')) defaultPort = '29536';
-
-    setForm({
-      ...form,
-      protocolType: protocol,
-      port: defaultPort,
-    });
-  };
-
   const handleCreate = async (e) => {
-    e.preventDefault();
+    if (e) e.preventDefault();
+    if (!form.name.trim()) return;
+
     requireAuth(async () => {
       try {
-        await api.post('/gateways', form);
-        toast?.showToast?.(`Gateway "${form.name}" created successfully!`, 'success');
-        setShowAddModal(false);
-        setForm({
-          name: '',
-          protocolType: 'Modbus TCP / RTU',
-          ip: '192.168.1.120',
-          port: '502',
-          pollInterval: '5000',
-          description: '',
+        setCreatingGateway(true);
+        const selectedProfile = profiles.find(p => p.id === form.deviceProfileId);
+        await api.post('/gateways', {
+          name: form.name.trim(),
+          deviceProfileId: form.deviceProfileId || null,
+          description: selectedProfile ? `${selectedProfile.name} Gateway` : 'Industrial Edge Gateway',
         });
-        loadGateways();
+        toast?.showToast?.(`Gateway "${form.name.trim()}" created successfully!`, 'success');
+        setShowAddModal(false);
+        setForm(prev => ({
+          name: '',
+          deviceProfileId: prev.deviceProfileId,
+        }));
+        await loadGateways();
       } catch (err) {
         toast?.showToast?.(err.response?.data?.error || 'Failed to create gateway', 'error');
+      } finally {
+        setCreatingGateway(false);
       }
     }, 'add a new Gateway');
   };
@@ -895,7 +903,7 @@ export default function GatewayList() {
       )}
 
       {/* ============================================================== */}
-      {/* MODAL 4: ADD GATEWAY (Matching User's Brand Colors)            */}
+      {/* MODAL 4: ADD GATEWAY (Pixel-Matched to Screenshot with User Brand Colors) */}
       {/* ============================================================== */}
       {showAddModal && (
         <div
@@ -903,178 +911,160 @@ export default function GatewayList() {
             position: 'fixed',
             inset: 0,
             zIndex: 9999,
-            background: 'rgba(15, 30, 54, 0.7)',
+            background: 'rgba(0, 0, 0, 0.45)',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
             padding: 16,
-            backdropFilter: 'blur(3px)'
+            backdropFilter: 'blur(2px)'
           }}
           onClick={() => setShowAddModal(false)}
         >
           <div
             style={{
               width: '100%',
-              maxWidth: 520,
+              maxWidth: 480,
               background: '#ffffff',
-              borderRadius: 10,
+              borderRadius: 6,
               overflow: 'hidden',
-              boxShadow: '0 20px 40px rgba(0,0,0,0.3)',
+              boxShadow: '0 12px 32px rgba(0, 0, 0, 0.22)',
               fontFamily: "'Inter', sans-serif"
             }}
             onClick={e => e.stopPropagation()}
           >
+            {/* Modal Header */}
             <div
               style={{
                 background: BRAND_NAVY,
                 color: '#ffffff',
-                padding: '14px 20px',
+                padding: '16px 20px',
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'space-between'
               }}
             >
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 16, fontWeight: 600 }}>
-                <Network size={18} />
-                <span>Add Gateway</span>
-              </div>
+              <h2 style={{ margin: 0, fontSize: 18, fontWeight: 500, letterSpacing: '-0.2px', color: '#ffffff' }}>
+                Add gateway
+              </h2>
               <button
                 type="button"
                 onClick={() => setShowAddModal(false)}
-                style={{ border: 'none', background: 'transparent', color: '#ffffff', cursor: 'pointer', padding: 4 }}
+                style={{
+                  border: 'none',
+                  background: 'transparent',
+                  color: '#ffffff',
+                  cursor: 'pointer',
+                  padding: 4,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  opacity: 0.85,
+                  transition: 'opacity 0.15s'
+                }}
+                onMouseEnter={e => e.currentTarget.style.opacity = '1'}
+                onMouseLeave={e => e.currentTarget.style.opacity = '0.85'}
               >
-                <X size={18} />
+                <X size={20} />
               </button>
             </div>
 
+            {/* Modal Body Form */}
             <form onSubmit={handleCreate}>
-              <div style={{ padding: 20, display: 'flex', flexDirection: 'column', gap: 14 }}>
+              <div style={{ padding: '24px 24px 16px 24px', display: 'flex', flexDirection: 'column', gap: 20 }}>
+                {/* Field 1: Name* */}
                 <div>
-                  <label style={{ fontSize: 12, fontWeight: 600, color: '#475569' }}>Gateway Name *</label>
-                  <input
-                    type="text"
-                    required
-                    value={form.name}
-                    onChange={e => setForm({ ...form, name: e.target.value })}
-                    placeholder="e.g. rohit or Plant Floor Modbus Gateway 01"
-                    style={{
-                      width: '100%',
-                      marginTop: 4,
-                      padding: '8px 12px',
-                      borderRadius: 6,
-                      border: '1px solid #cbd5e1',
-                      fontSize: 13,
-                      outline: 'none'
-                    }}
-                  />
-                </div>
-
-                <div>
-                  <label style={{ fontSize: 12, fontWeight: 600, color: '#475569' }}>Industrial Protocol Type</label>
-                  <select
-                    value={form.protocolType}
-                    onChange={e => handleProtocolChange(e.target.value)}
-                    style={{
-                      width: '100%',
-                      marginTop: 4,
-                      padding: '8px 12px',
-                      borderRadius: 6,
-                      border: '1px solid #cbd5e1',
-                      fontSize: 13,
-                      outline: 'none',
-                      background: '#ffffff'
-                    }}
-                  >
-                    <option value="Modbus TCP / RTU">Modbus TCP / RTU (RS485 Serial)</option>
-                    <option value="OPC-UA Server Bridge">OPC-UA Server Bridge (SCADA / PLC)</option>
-                    <option value="BACnet IP">BACnet IP (Building Automation)</option>
-                    <option value="MQTT Edge Broker">MQTT Edge Broker / Bridge</option>
-                    <option value="CAN Bus / J1939">CAN Bus / J1939 (Heavy Machinery)</option>
-                  </select>
-                </div>
-
-                <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: 12 }}>
-                  <div>
-                    <label style={{ fontSize: 12, fontWeight: 600, color: '#475569' }}>IP Address / Host</label>
+                  <div style={{ position: 'relative' }}>
                     <input
                       type="text"
-                      value={form.ip}
-                      onChange={e => setForm({ ...form, ip: e.target.value })}
-                      placeholder="192.168.1.120"
+                      required
+                      value={form.name}
+                      onChange={e => setForm({ ...form, name: e.target.value })}
+                      placeholder="Name*"
+                      autoFocus
                       style={{
                         width: '100%',
-                        marginTop: 4,
-                        padding: '8px 12px',
-                        borderRadius: 6,
+                        padding: '14px 14px',
+                        borderRadius: 4,
                         border: '1px solid #cbd5e1',
-                        fontSize: 13,
-                        outline: 'none'
+                        fontSize: 14,
+                        color: '#1e293b',
+                        outline: 'none',
+                        boxSizing: 'border-box',
+                        transition: 'border-color 0.15s, box-shadow 0.15s'
                       }}
-                    />
-                  </div>
-                  <div>
-                    <label style={{ fontSize: 12, fontWeight: 600, color: '#475569' }}>Port</label>
-                    <input
-                      type="number"
-                      value={form.port}
-                      onChange={e => setForm({ ...form, port: e.target.value })}
-                      placeholder="502"
-                      style={{
-                        width: '100%',
-                        marginTop: 4,
-                        padding: '8px 12px',
-                        borderRadius: 6,
-                        border: '1px solid #cbd5e1',
-                        fontSize: 13,
-                        outline: 'none'
+                      onFocus={e => {
+                        e.target.style.borderColor = BRAND_PRIMARY;
+                        e.target.style.boxShadow = `0 0 0 2px rgba(37, 99, 235, 0.15)`;
+                      }}
+                      onBlur={e => {
+                        e.target.style.borderColor = '#cbd5e1';
+                        e.target.style.boxShadow = 'none';
                       }}
                     />
                   </div>
                 </div>
 
+                {/* Field 2: Device profile* */}
                 <div>
-                  <label style={{ fontSize: 12, fontWeight: 600, color: '#475569' }}>Hardware Polling Interval (ms)</label>
-                  <input
-                    type="number"
-                    value={form.pollInterval}
-                    onChange={e => setForm({ ...form, pollInterval: e.target.value })}
-                    placeholder="5000"
-                    style={{
-                      width: '100%',
-                      marginTop: 4,
-                      padding: '8px 12px',
-                      borderRadius: 6,
-                      border: '1px solid #cbd5e1',
-                      fontSize: 13,
-                      outline: 'none'
-                    }}
-                  />
-                </div>
-
-                <div>
-                  <label style={{ fontSize: 12, fontWeight: 600, color: '#475569' }}>Description / Plant Location</label>
-                  <input
-                    type="text"
-                    value={form.description}
-                    onChange={e => setForm({ ...form, description: e.target.value })}
-                    placeholder="e.g. Substation MCC Room, Main Line Breakers"
-                    style={{
-                      width: '100%',
-                      marginTop: 4,
-                      padding: '8px 12px',
-                      borderRadius: 6,
-                      border: '1px solid #cbd5e1',
-                      fontSize: 13,
-                      outline: 'none'
-                    }}
-                  />
+                  <div style={{ position: 'relative' }}>
+                    <select
+                      value={form.deviceProfileId}
+                      onChange={e => setForm({ ...form, deviceProfileId: e.target.value })}
+                      required
+                      style={{
+                        width: '100%',
+                        padding: '14px 40px 14px 14px',
+                        borderRadius: 4,
+                        border: '1px solid #cbd5e1',
+                        fontSize: 14,
+                        color: '#1e293b',
+                        outline: 'none',
+                        background: '#ffffff',
+                        appearance: 'none',
+                        WebkitAppearance: 'none',
+                        cursor: 'pointer',
+                        boxSizing: 'border-box',
+                        transition: 'border-color 0.15s, box-shadow 0.15s'
+                      }}
+                      onFocus={e => {
+                        e.target.style.borderColor = BRAND_PRIMARY;
+                        e.target.style.boxShadow = `0 0 0 2px rgba(37, 99, 235, 0.15)`;
+                      }}
+                      onBlur={e => {
+                        e.target.style.borderColor = '#cbd5e1';
+                        e.target.style.boxShadow = 'none';
+                      }}
+                    >
+                      {profiles.length > 0 ? (
+                        profiles.map(p => (
+                          <option key={p.id} value={p.id}>
+                            {p.name} {p.type === 'GATEWAY' ? '(Gateway)' : ''}
+                          </option>
+                        ))
+                      ) : (
+                        <option value="">Smart Gateway</option>
+                      )}
+                    </select>
+                    <div style={{
+                      position: 'absolute',
+                      right: 14,
+                      top: '50%',
+                      transform: 'translateY(-50%)',
+                      pointerEvents: 'none',
+                      color: '#64748b',
+                      display: 'flex',
+                      alignItems: 'center'
+                    }}>
+                      <ChevronDown size={18} />
+                    </div>
+                  </div>
                 </div>
               </div>
 
+              {/* Modal Footer (Cancel & Create) */}
               <div
                 style={{
-                  padding: '12px 20px',
-                  borderTop: '1px solid #f1f5f9',
+                  padding: '14px 24px 20px 24px',
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'flex-end',
@@ -1087,29 +1077,46 @@ export default function GatewayList() {
                   style={{
                     border: 'none',
                     background: 'transparent',
-                    color: '#64748b',
-                    fontSize: 13,
+                    color: BRAND_PRIMARY,
+                    fontSize: 14,
                     fontWeight: 600,
-                    cursor: 'pointer'
+                    padding: '8px 16px',
+                    borderRadius: 4,
+                    cursor: 'pointer',
+                    transition: 'background-color 0.15s ease'
                   }}
+                  onMouseEnter={e => e.currentTarget.style.backgroundColor = 'rgba(37, 99, 235, 0.08)'}
+                  onMouseLeave={e => e.currentTarget.style.backgroundColor = 'transparent'}
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
+                  disabled={!form.name.trim() || creatingGateway}
                   style={{
-                    backgroundColor: BRAND_NAVY,
-                    color: '#ffffff',
+                    backgroundColor: !form.name.trim() || creatingGateway ? '#e2e8f0' : BRAND_NAVY,
+                    color: !form.name.trim() || creatingGateway ? '#94a3b8' : '#ffffff',
                     border: 'none',
-                    borderRadius: 6,
-                    padding: '8px 18px',
-                    fontSize: 13,
+                    borderRadius: 4,
+                    padding: '9px 24px',
+                    fontSize: 14,
                     fontWeight: 600,
-                    cursor: 'pointer',
-                    boxShadow: '0 1px 3px rgba(15, 30, 54, 0.2)'
+                    cursor: !form.name.trim() || creatingGateway ? 'not-allowed' : 'pointer',
+                    boxShadow: !form.name.trim() || creatingGateway ? 'none' : '0 1px 3px rgba(15, 30, 54, 0.25)',
+                    transition: 'all 0.15s ease'
+                  }}
+                  onMouseEnter={e => {
+                    if (form.name.trim() && !creatingGateway) {
+                      e.currentTarget.style.backgroundColor = BRAND_PRIMARY;
+                    }
+                  }}
+                  onMouseLeave={e => {
+                    if (form.name.trim() && !creatingGateway) {
+                      e.currentTarget.style.backgroundColor = BRAND_NAVY;
+                    }
                   }}
                 >
-                  Save Gateway
+                  {creatingGateway ? 'Creating...' : 'Create'}
                 </button>
               </div>
             </form>

@@ -22,10 +22,18 @@ export default function DeviceList() {
   useEffect(() => {
     if (!subscribe) return;
     const unsub = subscribe('__global__', (event) => {
-      if (event.type === 'TELEMETRY_UPDATE' && event.entityId) {
+      if ((event.type === 'TELEMETRY_UPDATE' || event.type === 'DEVICE_STATUS_UPDATE') && event.entityId) {
         setDevices(prev => prev.map(d => {
           if (d.id === event.entityId) {
-            return { ...d, isActive: true, lastActivityTime: new Date().toISOString() };
+            return { ...d, isActive: true, lastActivityTime: event.lastActivityTime || new Date().toISOString() };
+          }
+          return d;
+        }));
+      }
+      if (event.type === 'DEVICE_DISCONNECTED' && event.entityId) {
+        setDevices(prev => prev.map(d => {
+          if (d.id === event.entityId) {
+            return { ...d, isActive: false };
           }
           return d;
         }));
@@ -246,7 +254,11 @@ export default function DeviceList() {
             ) : (
               devices.map((device) => {
                 const isSelected = selectedIds.includes(device.id);
-                const isOnline = device.lastActivityTime && (Date.now() - new Date(device.lastActivityTime).getTime() < 6000);
+                const isOnline = Boolean(
+                  device.isActive &&
+                  device.lastActivityTime &&
+                  (Date.now() - new Date(device.lastActivityTime).getTime() < 60000)
+                );
                 return (
                   <tr
                     key={device.id}

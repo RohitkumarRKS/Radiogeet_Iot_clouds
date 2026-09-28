@@ -130,22 +130,22 @@ export default function ProfileSettings() {
   });
 
   const [whiteLabelForm, setWhiteLabelForm] = useState({
-    appTitle: 'ThingsBoard Cloud',
+    appTitle: 'RadioGeet Cloud',
     logoUrl: '',
     faviconUrl: '',
-    primaryColor: '#305680',
-    headerBgColor: '#0b132b',
+    primaryColor: '#2563EB',
+    headerBgColor: '#0F1E36',
     domainName: '',
-    copyrightText: '© 2026 CloudBoard IoT Platform',
+    copyrightText: '© 2026 RadioGeet IoT Platform',
     customCss: '',
     showNameVersion: true,
     enableHelpLinks: true,
-    platformName: 'ThingsBoard',
-    platformVersion: '3.7.1PE',
+    platformName: 'RadioGeet',
+    platformVersion: '1.0.0',
   });
 
   const [generalForm, setGeneralForm] = useState({
-    baseUrl: 'https://thingsboard.cloud',
+    baseUrl: 'https://iot.radiogeet.com',
     telemetryRetentionDays: 30,
     auditLogRetentionDays: 90,
     maxPayloadKb: 512,
@@ -440,7 +440,7 @@ export default function ProfileSettings() {
           </div>
           <h1 className="page-title" style={{ fontSize: 'var(--font-size-2xl)', display: 'flex', alignItems: 'center', gap: '8px' }}>
             <User size={22} style={{ color: 'var(--color-primary)' }} />
-            ThingsBoard Account & Tenant Configuration
+            RadioGeet Account & Tenant Configuration
           </h1>
         </div>
       </div>

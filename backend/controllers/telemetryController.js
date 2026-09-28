@@ -141,32 +141,46 @@ exports.pushGatewayTelemetry = async (req, res, next) => {
     const { processTelemetry } = require('../services/telemetryService');
     const processedDevices = [];
 
-    for (const [subDeviceName, subData] of Object.entries(body)) {
-      if (!subDeviceName || typeof subData !== 'object') continue;
+    // Check if payload is direct flat tags (e.g. { "temp": 25.4, "pressure": 6.8 })
+    const isDirectFlat = Object.values(body).every(val => typeof val !== 'object' || val === null);
 
-      const [subDevice] = await Device.findOrCreate({
-        where: { name: subDeviceName, tenantId: gateway.tenantId },
-        defaults: {
-          name: subDeviceName,
-          type: 'sensor',
-          label: `Gateway Device (${gateway.name})`,
-          tenantId: gateway.tenantId,
-          customerId: gateway.customerId,
-          isActive: true,
-          additionalInfo: { gatewayId: gateway.id }
-        }
-      });
+    if (isDirectFlat) {
+      await processTelemetry(gateway.id, body, Date.now());
+      processedDevices.push(gateway.name);
+    } else {
+      for (const [subDeviceName, subData] of Object.entries(body)) {
+        if (!subDeviceName) continue;
 
-      if (Array.isArray(subData)) {
-        for (const item of subData) {
-          const values = item.values || item;
-          const ts = item.ts ? new Date(item.ts).getTime() : Date.now();
-          await processTelemetry(subDevice.id, values, ts);
+        // If scalar value, treat as gateway's direct tag
+        if (typeof subData !== 'object' || subData === null) {
+          await processTelemetry(gateway.id, { [subDeviceName]: subData }, Date.now());
+          continue;
         }
-      } else {
-        await processTelemetry(subDevice.id, subData, Date.now());
+
+        const [subDevice] = await Device.findOrCreate({
+          where: { name: subDeviceName, tenantId: gateway.tenantId },
+          defaults: {
+            name: subDeviceName,
+            type: 'sensor',
+            label: `Gateway Device (${gateway.name})`,
+            tenantId: gateway.tenantId,
+            customerId: gateway.customerId,
+            isActive: true,
+            additionalInfo: { gatewayId: gateway.id }
+          }
+        });
+
+        if (Array.isArray(subData)) {
+          for (const item of subData) {
+            const values = item.values || item;
+            const ts = item.ts ? new Date(item.ts).getTime() : Date.now();
+            await processTelemetry(subDevice.id, values, ts);
+          }
+        } else {
+          await processTelemetry(subDevice.id, subData, Date.now());
+        }
+        processedDevices.push(subDeviceName);
       }
-      processedDevices.push(subDeviceName);
     }
 
     // Update gateway last activity
