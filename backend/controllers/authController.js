@@ -58,6 +58,15 @@ exports.login = async (req, res, next) => {
       return res.status(403).json({ error: 'Your account has been deactivated. Contact your administrator.' });
     }
 
+    // Check if Two-Factor Authentication (2FA) is enabled for this user
+    if (user.twoFAEnabled && user.twoFAVerified) {
+      return res.json({
+        require2FA: true,
+        userId: user.id,
+        message: 'Two-factor authentication is required. Please enter your 6-digit TOTP code.',
+      });
+    }
+
     const tokens = generateTokens(user);
 
     // Audit log
@@ -92,6 +101,24 @@ exports.register = async (req, res, next) => {
     if (!email || !password || !firstName) {
       return res.status(400).json({ error: 'Email, password, and first name are required.' });
     }
+
+    // Password strength enforcement
+    if (password.length < 8) {
+      return res.status(400).json({ error: 'Password must be at least 8 characters long.' });
+    }
+    if (password.length > 72) {
+      return res.status(400).json({ error: 'Password must be at most 72 characters long.' });
+    }
+    if (!/[A-Z]/.test(password)) {
+      return res.status(400).json({ error: 'Password must contain at least one uppercase letter.' });
+    }
+    if (!/[0-9]/.test(password)) {
+      return res.status(400).json({ error: 'Password must contain at least one digit.' });
+    }
+    if (!/[!@#$%^&*(),.?":{}|<>_\-+=\[\]~`\\\/]/.test(password)) {
+      return res.status(400).json({ error: 'Password must contain at least one special character (!@#$%^&* etc.).' });
+    }
+
 
     const existing = await User.findOne({ where: { email } });
     if (existing) {

@@ -6,8 +6,11 @@ const errorHandler = (err, req, res, next) => {
     });
   }
 
+  // Log full error details server-side (always)
   console.error('Error:', err.message);
-  console.error(err.stack);
+  if (process.env.NODE_ENV !== 'production') {
+    console.error(err.stack);
+  }
 
   if (err.name === 'SequelizeValidationError') {
     return res.status(400).json({
@@ -31,8 +34,11 @@ const errorHandler = (err, req, res, next) => {
 
   const status = err.statusCode || 500;
   res.status(status).json({
-    error: err.message || 'Internal server error',
+    error: process.env.NODE_ENV === 'production'
+      ? 'Internal server error'
+      : (err.message || 'Internal server error'),
   });
 };
 
 module.exports = errorHandler;
+

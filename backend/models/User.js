@@ -57,6 +57,22 @@ const User = sequelize.define('User', {
     type: DataTypes.BOOLEAN,
     defaultValue: true,
   },
+  twoFASecret: {
+    type: DataTypes.STRING,
+    allowNull: true,
+    defaultValue: null,
+    comment: 'TOTP secret for Google Authenticator / Authy 2FA',
+  },
+  twoFAEnabled: {
+    type: DataTypes.BOOLEAN,
+    defaultValue: false,
+    comment: 'Whether 2FA is active for this user',
+  },
+  twoFAVerified: {
+    type: DataTypes.BOOLEAN,
+    defaultValue: false,
+    comment: 'Whether user has completed 2FA setup verification',
+  },
 }, {
   hooks: {
     beforeCreate: async (user) => {
@@ -79,6 +95,7 @@ User.prototype.comparePassword = async function (password) {
 User.prototype.toJSON = function () {
   const values = { ...this.get() };
   delete values.password;
+  delete values.twoFASecret;
   return values;
 };
 

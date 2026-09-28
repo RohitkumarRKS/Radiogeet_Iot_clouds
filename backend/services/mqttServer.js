@@ -1,10 +1,16 @@
 const net = require('net');
+const tls = require('tls');
+const fs = require('fs');
+const path = require('path');
 const { Device } = require('../models');
 const { processTelemetry } = require('./telemetryService');
 
 let server = null;
+let tlsServer = null;
 const connectedSockets = new Map();
 const MQTT_PORT = process.env.MQTT_PORT || 1883;
+const MQTTS_PORT = process.env.MQTTS_PORT || 8883;
+const CERTS_DIR = process.env.CERTS_DIR || path.join(__dirname, '../certs');
 
 /**
  * Native Lightweight MQTT Broker Service for IoT Devices
@@ -325,87 +331,96 @@ async function handlePublishPacket(socket, byte0, packet, headerOffset) {
   }
 }
 
+/**
+ * Shared MQTT socket handler — used by both plain TCP and TLS servers
+ * to avoid code duplication.
+ */
+function handleMqttSocket(socket) {
+  socket._mqttBuffer = Buffer.alloc(0);
+  socket.clientToken = null;
+
+  socket.on('data', async (chunk) => {
+    socket._mqttBuffer = Buffer.concat([socket._mqttBuffer, chunk]);
+
+    while (socket._mqttBuffer.length >= 2) {
+      const byte0 = socket._mqttBuffer[0];
+      const packetType = (byte0 >> 4) & 0x0F;
+
+      let parsedLen = null;
+      try {
+        parsedLen = parseRemainingLength(socket._mqttBuffer, 1);
+      } catch (e) {
+        console.warn('MQTT Packet parse error:', e.message);
+        socket.destroy();
+        return;
+      }
+
+      if (!parsedLen) {
+        // Packet incomplete, await next TCP chunk
+        return;
+      }
+
+      const headerLength = 1 + parsedLen.bytesRead;
+      const totalPacketLength = headerLength + parsedLen.value;
+
+      if (socket._mqttBuffer.length < totalPacketLength) {
+        // Complete packet not yet buffered
+        return;
+      }
+
+      // Extract packet slice
+      const packet = socket._mqttBuffer.subarray(0, totalPacketLength);
+      socket._mqttBuffer = socket._mqttBuffer.subarray(totalPacketLength);
+
+      // Process Packet Type
+      if (packetType === 1) {
+        // CONNECT
+        handleConnectPacket(socket, packet, headerLength);
+      } else if (packetType === 3) {
+        // PUBLISH
+        await handlePublishPacket(socket, byte0, packet, headerLength);
+      } else if (packetType === 12) {
+        // PINGREQ -> Respond PINGRESP
+        socket.write(Buffer.from([0xD0, 0x00]));
+      } else if (packetType === 14) {
+        // DISCONNECT
+        socket.end();
+      }
+    }
+  });
+
+  socket.on('close', async () => {
+    if (socket.clientToken) {
+      connectedSockets.delete(socket.clientToken);
+      try {
+        const device = await Device.findOne({ where: { accessToken: socket.clientToken } });
+        if (device) {
+          await device.update({ isActive: false });
+          const wsServer = require('../websocket/wsServer');
+          wsServer.broadcast(device.id, {
+            type: 'DEVICE_DISCONNECTED',
+            entityId: device.id,
+            deviceName: device.name,
+            status: 'DISCONNECTED',
+            timestamp: new Date().toISOString()
+          });
+          console.log(`🔌 MQTT Device Disconnected [${device.name}] -> Status OFFLINE (Telemetry -> 0)`);
+        }
+      } catch (e) {
+        console.error('Error handling device disconnect:', e.message);
+      }
+    }
+  });
+
+  socket.on('error', () => {});
+}
+
 function startMqttServer() {
   if (server) return;
 
+  // Plain TCP MQTT Server (Port 1883)
   server = net.createServer((socket) => {
-    socket._mqttBuffer = Buffer.alloc(0);
-    socket.clientToken = null;
-
-    socket.on('data', async (chunk) => {
-      socket._mqttBuffer = Buffer.concat([socket._mqttBuffer, chunk]);
-
-      while (socket._mqttBuffer.length >= 2) {
-        const byte0 = socket._mqttBuffer[0];
-        const packetType = (byte0 >> 4) & 0x0F;
-
-        let parsedLen = null;
-        try {
-          parsedLen = parseRemainingLength(socket._mqttBuffer, 1);
-        } catch (e) {
-          console.warn('MQTT Packet parse error:', e.message);
-          socket.destroy();
-          return;
-        }
-
-        if (!parsedLen) {
-          // Packet incomplete, await next TCP chunk
-          return;
-        }
-
-        const headerLength = 1 + parsedLen.bytesRead;
-        const totalPacketLength = headerLength + parsedLen.value;
-
-        if (socket._mqttBuffer.length < totalPacketLength) {
-          // Complete packet not yet buffered
-          return;
-        }
-
-        // Extract packet slice
-        const packet = socket._mqttBuffer.subarray(0, totalPacketLength);
-        socket._mqttBuffer = socket._mqttBuffer.subarray(totalPacketLength);
-
-        // Process Packet Type
-        if (packetType === 1) {
-          // CONNECT
-          handleConnectPacket(socket, packet, headerLength);
-        } else if (packetType === 3) {
-          // PUBLISH
-          await handlePublishPacket(socket, byte0, packet, headerLength);
-        } else if (packetType === 12) {
-          // PINGREQ -> Respond PINGRESP
-          socket.write(Buffer.from([0xD0, 0x00]));
-        } else if (packetType === 14) {
-          // DISCONNECT
-          socket.end();
-        }
-      }
-    });
-
-    socket.on('close', async () => {
-      if (socket.clientToken) {
-        connectedSockets.delete(socket.clientToken);
-        try {
-          const device = await Device.findOne({ where: { accessToken: socket.clientToken } });
-          if (device) {
-            await device.update({ isActive: false });
-            const wsServer = require('../websocket/wsServer');
-            wsServer.broadcast(device.id, {
-              type: 'DEVICE_DISCONNECTED',
-              entityId: device.id,
-              deviceName: device.name,
-              status: 'DISCONNECTED',
-              timestamp: new Date().toISOString()
-            });
-            console.log(`🔌 MQTT Device Disconnected [${device.name}] -> Status OFFLINE (Telemetry -> 0)`);
-          }
-        } catch (e) {
-          console.error('Error handling device disconnect:', e.message);
-        }
-      }
-    });
-
-    socket.on('error', () => {});
+    handleMqttSocket(socket);
   });
 
   server.on('error', (err) => {
@@ -424,6 +439,66 @@ function startMqttServer() {
 
     // Proactively check and connect Mosquitto Bridge Client if Mosquitto Service is active
     startMqttBridgeClient();
+  });
+
+  // MQTTS (TLS-encrypted MQTT) Server on Port 8883
+  startMqttTlsServer();
+}
+
+/**
+ * Start a TLS-encrypted MQTT server on port 8883 (MQTTS).
+ * Only starts if certificate files are present in the certs directory.
+ * Devices connect via mqtts://server:8883 for encrypted communication.
+ */
+function startMqttTlsServer() {
+  const certPath = path.join(CERTS_DIR, 'server.crt');
+  const keyPath = path.join(CERTS_DIR, 'server.key');
+  const caPath = path.join(CERTS_DIR, 'ca.crt');
+
+  if (!fs.existsSync(certPath) || !fs.existsSync(keyPath)) {
+    console.log(`ℹ️  MQTTS skipped: Certificate files not found in ${CERTS_DIR}/`);
+    console.log(`   To enable MQTTS (Port ${MQTTS_PORT}), place server.crt and server.key in ${CERTS_DIR}/\n`);
+    return;
+  }
+
+  const tlsOptions = {
+    key: fs.readFileSync(keyPath),
+    cert: fs.readFileSync(certPath),
+  };
+
+  // Optional: Enable mTLS (mutual TLS) if CA certificate is present
+  if (fs.existsSync(caPath)) {
+    tlsOptions.ca = [fs.readFileSync(caPath)];
+    tlsOptions.requestCert = true;
+    tlsOptions.rejectUnauthorized = true;
+    console.log(`🔐 mTLS enabled: Device X.509 client certificates will be verified against ${caPath}`);
+  }
+
+  tlsServer = tls.createServer(tlsOptions, (socket) => {
+    // Log mTLS certificate info if available
+    if (tlsOptions.requestCert && socket.authorized) {
+      const clientCert = socket.getPeerCertificate();
+      if (clientCert && clientCert.subject) {
+        console.log(`🔐 MQTTS Device authenticated via X.509 cert CN: ${clientCert.subject.CN}`);
+        // Use certificate CN as device access token for mTLS auth
+        socket.clientToken = clientCert.subject.CN;
+        connectedSockets.set(socket.clientToken, socket);
+      }
+    }
+    handleMqttSocket(socket);
+  });
+
+  tlsServer.on('error', (err) => {
+    if (err.code === 'EADDRINUSE') {
+      console.warn(`⚠️ MQTTS Port ${MQTTS_PORT} is already in use.`);
+    } else {
+      console.error('MQTTS Server error:', err.message);
+    }
+  });
+
+  tlsServer.listen(MQTTS_PORT, '0.0.0.0', () => {
+    console.log(`🔒 MQTTS (Secure MQTT) listening on mqtts://0.0.0.0:${MQTTS_PORT}`);
+    console.log(`   Encrypted with TLS | ${tlsOptions.requestCert ? 'mTLS (X.509 Client Cert)' : 'Server-Side TLS'}\n`);
   });
 }
 
@@ -545,6 +620,11 @@ function stopMqttServer() {
   if (bridgeReconnectTimer) {
     clearTimeout(bridgeReconnectTimer);
     bridgeReconnectTimer = null;
+  }
+  if (tlsServer) {
+    tlsServer.close();
+    tlsServer = null;
+    console.log('🛑 MQTTS Server stopped.');
   }
   if (server) {
     server.close();

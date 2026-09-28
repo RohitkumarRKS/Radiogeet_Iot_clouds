@@ -1,10 +1,14 @@
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
+const helmet = require('helmet');
+const rateLimit = require('express-rate-limit');
 const http = require('http');
 const { sequelize } = require('./models');
 const setupWebSocket = require('./websocket/wsServer');
 const errorHandler = require('./middleware/errorHandler');
+const sanitizeInput = require('./middleware/sanitize');
+const loginProtection = require('./middleware/loginProtection');
 
 // Routes
 const authRoutes = require('./routes/auth');
@@ -28,7 +32,42 @@ const gatewayRoutes = require('./routes/gateways');
 const app = express();
 const PORT = process.env.PORT || 2004;
 
-// Middleware
+// ─── Security Middleware ─────────────────────────────────────────────
+
+// Helmet: Set secure HTTP headers (X-Content-Type-Options, X-Frame-Options, HSTS, etc.)
+app.use(helmet({
+  contentSecurityPolicy: false, // Disabled for SPA compatibility
+  crossOriginEmbedderPolicy: false,
+}));
+
+// Global API Rate Limiter: 200 requests per 15 minutes per IP
+const apiLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 200,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many requests from this IP. Please try again after 15 minutes.' },
+});
+
+// Strict Login Rate Limiter: 5 attempts per 15 minutes per IP
+const loginLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 5,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many login attempts. Please try again after 15 minutes.' },
+});
+
+// Telemetry Endpoint Rate Limiter: 1000 requests per minute per IP
+const telemetryLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 1000,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Telemetry rate limit exceeded. Please reduce data frequency.' },
+});
+
+// CORS Configuration (Hardened for Production)
 const allowedOrigins = process.env.CORS_ORIGIN
   ? process.env.CORS_ORIGIN.split(',').map(s => s.trim())
   : ['http://localhost:5173', 'http://localhost:3000', 'http://localhost:2004', 'http://localhost:3001'];
@@ -38,13 +77,18 @@ app.use(cors({
     if (!origin || allowedOrigins.includes(origin) || process.env.NODE_ENV !== 'production') {
       callback(null, true);
     } else {
-      callback(null, true); // Allow requests in deployment
+      console.warn(`⚠️ CORS blocked request from unauthorized origin: ${origin}`);
+      callback(new Error('CORS: Origin not allowed'), false);
     }
   },
   credentials: true,
 }));
+
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
+
+// Input Sanitization: Strip XSS from all request body strings
+app.use(sanitizeInput);
 
 // Serve static frontend dist in production if available
 const path = require('path');
@@ -53,6 +97,12 @@ const frontendDist = path.join(__dirname, '../frontend/dist');
 if (fs.existsSync(frontendDist)) {
   app.use(express.static(frontendDist));
 }
+
+// ─── Rate Limiters on Sensitive Routes ───────────────────────────────
+app.use('/api/', apiLimiter);
+app.use('/api/auth/login', loginLimiter, loginProtection);
+app.use('/api/telemetry/v1/', telemetryLimiter);
+app.use('/api/v1/', telemetryLimiter);
 
 // API Routes
 app.all('/api/v1/:accessToken/telemetry', require('./controllers/telemetryController').pushByAccessToken);
@@ -77,9 +127,44 @@ app.use('/api/admin', adminRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api/gateways', gatewayRoutes);
 
-// Health check
-app.get('/api/health', (req, res) => {
-  res.json({ status: 'ok', timestamp: new Date().toISOString() });
+// ─── Health Check Endpoint (/api/health) ─────────────────────────────
+app.get('/api/health', async (req, res) => {
+  const healthData = {
+    status: 'UP',
+    timestamp: new Date().toISOString(),
+    uptime: `${Math.floor(process.uptime())}s`,
+    version: require('./package.json').version || '1.0.0',
+    node: process.version,
+    memory: {
+      heapUsedMB: Math.round(process.memoryUsage().heapUsed / 1024 / 1024),
+      heapTotalMB: Math.round(process.memoryUsage().heapTotal / 1024 / 1024),
+      rssMB: Math.round(process.memoryUsage().rss / 1024 / 1024),
+    },
+    services: {},
+  };
+
+  // Check database connectivity
+  try {
+    await sequelize.authenticate();
+    healthData.services.database = { status: 'UP', type: sequelize.getDialect() };
+  } catch (e) {
+    healthData.services.database = { status: 'DOWN', error: e.message };
+    healthData.status = 'DEGRADED';
+  }
+
+  // Check MQTT server
+  try {
+    const mqttServer = require('./services/mqttServer');
+    healthData.services.mqtt = { status: 'UP', port: process.env.MQTT_PORT || 1883 };
+  } catch (e) {
+    healthData.services.mqtt = { status: 'UNKNOWN' };
+  }
+
+  // Check WebSocket
+  healthData.services.websocket = { status: 'UP', path: '/api/ws' };
+
+  const httpStatus = healthData.status === 'UP' ? 200 : 503;
+  res.status(httpStatus).json(healthData);
 });
 
 // SPA fallback for frontend dist in production
@@ -236,6 +321,10 @@ async function start() {
       // Start native MQTT Server on TCP Port 1883
       const { startMqttServer } = require('./services/mqttServer');
       startMqttServer();
+
+      // Start Telemetry Retention Auto-Purge Service
+      const { startRetentionPurgeService } = require('./services/retentionPurgeService');
+      startRetentionPurgeService();
     });
   } catch (error) {
     console.error('Failed to start server:', error);
