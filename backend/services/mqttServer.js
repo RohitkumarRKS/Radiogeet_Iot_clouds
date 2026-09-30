@@ -183,13 +183,15 @@ async function handlePublishPacket(socket, byte0, packet, headerOffset) {
       let s = raw.trim();
       // 1. Fix double double quotes produced by gateway firmware: ""MSG21-DEV-1"" -> "MSG21-DEV-1"
       s = s.replace(/""/g, '"');
-      // 2. Fix unquoted object keys: {temperature: 25.5} -> {"temperature": 25.5}
+      // 2. Fix keys with missing opening quote: ,temperature": -> ,"temperature":
+      s = s.replace(/([{,]\s*)([a-zA-Z0-9_$]+)"\s*:/g, '$1"$2":');
+      // 3. Fix unquoted object keys: {temperature: 25.5} -> {"temperature": 25.5}
       s = s.replace(/([{,]\s*)([a-zA-Z0-9_$]+)\s*:/g, '$1"$2":');
-      // 3. Fix unreplaced gateway placeholders: <Tag1>, $Tag1, %Tag1% -> 0
+      // 4. Fix unreplaced gateway placeholders: <Tag1>, $Tag1, %Tag1% -> 0
       s = s.replace(/:\s*<([a-zA-Z0-9_$]+)>/g, ': 0');
       s = s.replace(/:\s*\$([a-zA-Z0-9_]+)/g, ': 0');
       s = s.replace(/:\s*%([a-zA-Z0-9_]+)%/g, ': 0');
-      // 4. Fix unquoted string values: : Tag1 -> : 0 (preserve booleans/null)
+      // 5. Fix unquoted string values: : Tag1 -> : 0 (preserve booleans/null)
       s = s.replace(/:\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*([,}])/g, (m, id, end) => {
         if (id === 'true' || id === 'false' || id === 'null') return `: ${id}${end}`;
         return `: 0${end}`;
