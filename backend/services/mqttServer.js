@@ -448,6 +448,15 @@ async function handlePublishPacket(socket, byte0, packet, headerOffset) {
       telemetryData = payload.values;
     }
 
+    // Industrial smart alias: if scanner sends PV_CH1, PV1, or CH1, mirror to temperature
+    const scannerVal = telemetryData.PV_CH1 !== undefined ? telemetryData.PV_CH1
+      : telemetryData.PV1 !== undefined ? telemetryData.PV1
+      : telemetryData.CH1 !== undefined ? telemetryData.CH1
+      : undefined;
+    if (scannerVal !== undefined && telemetryData.temperature === undefined) {
+      telemetryData.temperature = scannerVal;
+    }
+
     // Process telemetry in database + WebSocket broadcast
     await processTelemetry(device.id, telemetryData, Date.now());
     console.log(`📡 MQTT Received Telemetry for Device [${device.name}] on topic [${topic}]:`, telemetryData);
