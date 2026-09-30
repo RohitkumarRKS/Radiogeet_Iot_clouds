@@ -175,33 +175,47 @@ async function handlePublishPacket(socket, byte0, packet, headerOffset) {
       socket.write(puback);
     }
 
-    // Parse JSON payload (with smart fallback for unquoted keys)
+    // Parse JSON payload (with industrial IoT gateway smart cleanup)
     let payload = null;
+
+    // Helper to sanitize malformed gateway JSON
+    const sanitizeGatewayJson = (raw) => {
+      let s = raw.trim();
+      // 1. Fix double double quotes produced by gateway firmware: ""MSG21-DEV-1"" -> "MSG21-DEV-1"
+      s = s.replace(/""/g, '"');
+      // 2. Fix unquoted object keys: {temperature: 25.5} -> {"temperature": 25.5}
+      s = s.replace(/([{,]\s*)([a-zA-Z0-9_$]+)\s*:/g, '$1"$2":');
+      // 3. Fix unreplaced gateway placeholders: <Tag1>, $Tag1, %Tag1% -> 0
+      s = s.replace(/:\s*<([a-zA-Z0-9_$]+)>/g, ': 0');
+      s = s.replace(/:\s*\$([a-zA-Z0-9_]+)/g, ': 0');
+      s = s.replace(/:\s*%([a-zA-Z0-9_]+)%/g, ': 0');
+      // 4. Fix unquoted string values: : Tag1 -> : 0 (preserve booleans/null)
+      s = s.replace(/:\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*([,}])/g, (m, id, end) => {
+        if (id === 'true' || id === 'false' || id === 'null') return `: ${id}${end}`;
+        return `: 0${end}`;
+      });
+      return s;
+    };
+
     try {
       payload = JSON.parse(payloadStr);
     } catch (e) {
-      // Handle string payloads, partial JSON, or unquoted keys like {temperature: 25.5}
-      const jsonStart = payloadStr.indexOf('{');
-      const jsonEnd = payloadStr.lastIndexOf('}');
-      if (jsonStart !== -1 && jsonEnd !== -1 && jsonEnd > jsonStart) {
-        const jsonSub = payloadStr.substring(jsonStart, jsonEnd + 1);
-        try {
-          payload = JSON.parse(jsonSub);
-        } catch (e2) {
+      // Fast path failed, attempt sanitized parse
+      try {
+        payload = JSON.parse(sanitizeGatewayJson(payloadStr));
+      } catch (e2) {
+        // Attempt substring between first { and last }
+        const jsonStart = payloadStr.indexOf('{');
+        const jsonEnd = payloadStr.lastIndexOf('}');
+        if (jsonStart !== -1 && jsonEnd !== -1 && jsonEnd > jsonStart) {
+          const jsonSub = payloadStr.substring(jsonStart, jsonEnd + 1);
           try {
-            // Repair unquoted object keys: {temperature: 25.5} -> {"temperature": 25.5}
-            let repairedJson = jsonSub.replace(/([{,]\s*)([a-zA-Z0-9_$]+)\s*:/g, '$1"$2":');
-            // Repair unreplaced gateway placeholders: <Tag1>, $Tag1, %Tag1% -> 0
-            repairedJson = repairedJson.replace(/:\s*<([a-zA-Z0-9_$]+)>/g, ': 0');
-            repairedJson = repairedJson.replace(/:\s*\$([a-zA-Z0-9_]+)/g, ': 0');
-            repairedJson = repairedJson.replace(/:\s*%([a-zA-Z0-9_]+)%/g, ': 0');
-            // Repair unquoted string values like : Tag1 -> : 0
-            repairedJson = repairedJson.replace(/:\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*([,}])/g, (m, id, end) => {
-              if (id === 'true' || id === 'false' || id === 'null') return `: ${id}${end}`;
-              return `: 0${end}`;
-            });
-            payload = JSON.parse(repairedJson);
-          } catch (e3) { /* malformed payload */ }
+            payload = JSON.parse(jsonSub);
+          } catch (e3) {
+            try {
+              payload = JSON.parse(sanitizeGatewayJson(jsonSub));
+            } catch (e4) { /* malformed payload */ }
+          }
         }
       }
     }

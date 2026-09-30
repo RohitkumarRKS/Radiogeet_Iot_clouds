@@ -33,7 +33,7 @@ async function processTelemetry(entityId, data, timestamp = Date.now()) {
       } else if (typeof value === 'string') {
         const parsed = parseFloat(value);
         numericValue = !isNaN(parsed) ? parsed : 0;
-        stringVal = String(numericValue);
+        stringVal = value;
       } else if (typeof value === 'object' && value !== null) {
         numericValue = 0;
         stringVal = JSON.stringify(value);
