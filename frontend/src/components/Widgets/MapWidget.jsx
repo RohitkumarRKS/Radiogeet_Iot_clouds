@@ -1,5 +1,7 @@
 import React, { useEffect, useRef } from 'react';
 import { MapPin, Locate } from 'lucide-react';
+import L from 'leaflet';
+import 'leaflet/dist/leaflet.css';
 
 export default function MapWidget({ title, lat = 28.6139, lng = 77.2090, deviceName = 'GPS Tracker Device', speed = 0, style = {} }) {
   const mapContainerRef = useRef(null);
@@ -11,9 +13,6 @@ export default function MapWidget({ title, lat = 28.6139, lng = 77.2090, deviceN
 
   useEffect(() => {
     if (!mapContainerRef.current) return;
-    if (typeof window === 'undefined' || !window.L) return;
-
-    const L = window.L;
 
     if (!mapInstanceRef.current) {
       const map = L.map(mapContainerRef.current, {

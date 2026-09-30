@@ -17,6 +17,25 @@ export function AuthProvider({ children }) {
       setLoading(false);
       return;
     }
+
+    // Quick client-side expiry check to avoid unnecessary 401 requests
+    try {
+      const payload = JSON.parse(atob(token.split('.')[1]));
+      if (payload.exp && payload.exp * 1000 < Date.now()) {
+        localStorage.removeItem('token');
+        localStorage.removeItem('refreshToken');
+        setUser(null);
+        setLoading(false);
+        return;
+      }
+    } catch (_) {
+      localStorage.removeItem('token');
+      localStorage.removeItem('refreshToken');
+      setUser(null);
+      setLoading(false);
+      return;
+    }
+
     try {
       const res = await api.get('/auth/user', {
         headers: { 'X-Portal': 'tenant' }
@@ -32,7 +51,7 @@ export function AuthProvider({ children }) {
     }
   }, []);
 
-  // Fetch super admin session
+  // Fetch super admin session — only when a valid token exists
   const fetchSuperAdminUser = useCallback(async () => {
     const superToken = localStorage.getItem('superAdminToken');
     if (!superToken) {
@@ -40,6 +59,27 @@ export function AuthProvider({ children }) {
       setSuperAdminLoading(false);
       return;
     }
+
+    // Quick client-side expiry check to avoid unnecessary 401 requests
+    try {
+      const payload = JSON.parse(atob(superToken.split('.')[1]));
+      if (payload.exp && payload.exp * 1000 < Date.now()) {
+        // Token already expired — clean up without hitting the server
+        localStorage.removeItem('superAdminToken');
+        localStorage.removeItem('superAdminRefreshToken');
+        setSuperAdminUser(null);
+        setSuperAdminLoading(false);
+        return;
+      }
+    } catch (_) {
+      // Malformed token — remove it
+      localStorage.removeItem('superAdminToken');
+      localStorage.removeItem('superAdminRefreshToken');
+      setSuperAdminUser(null);
+      setSuperAdminLoading(false);
+      return;
+    }
+
     try {
       const res = await api.get('/auth/user', {
         headers: { 'X-Portal': 'superadmin' }

@@ -9,11 +9,23 @@ export function WebSocketProvider({ children }) {
   const [connected, setConnected] = useState(false);
   const listenersRef = useRef(new Map());
   const reconnectTimeoutRef = useRef(null);
+  const reconnectAttemptsRef = useRef(0);
+  const intentionalCloseRef = useRef(false);
   const userId = user?.id || user?.email;
 
   const connect = useCallback(() => {
     const token = localStorage.getItem('token');
     if (!token) return;
+
+    // Quick client-side expiry check — don't connect with expired token
+    try {
+      const payload = JSON.parse(atob(token.split('.')[1]));
+      if (payload.exp && payload.exp * 1000 < Date.now()) {
+        return;
+      }
+    } catch (_) {
+      return;
+    }
 
     if (wsRef.current && (wsRef.current.readyState === WebSocket.OPEN || wsRef.current.readyState === WebSocket.CONNECTING)) {
       return;
@@ -29,6 +41,7 @@ export function WebSocketProvider({ children }) {
 
       ws.onopen = () => {
         setConnected(true);
+        reconnectAttemptsRef.current = 0;
         console.log('WebSocket connected');
         // Re-subscribe all active entity listeners to server upon reconnect
         listenersRef.current.forEach((_, entityId) => {
@@ -63,16 +76,26 @@ export function WebSocketProvider({ children }) {
       ws.onclose = (evt) => {
         setConnected(false);
         wsRef.current = null;
-        console.log(`WebSocket closed (code: ${evt.code})`);
+
+        // Only log unexpected closures (skip 1006 from BFCache / intentional close)
+        if (!intentionalCloseRef.current && evt.code !== 1006) {
+          console.log(`WebSocket closed (code: ${evt.code})`);
+        }
+        intentionalCloseRef.current = false;
+
         if (reconnectTimeoutRef.current) clearTimeout(reconnectTimeoutRef.current);
-        // Only auto-reconnect if logged in
-        if (localStorage.getItem('token')) {
-          reconnectTimeoutRef.current = setTimeout(connect, 3000);
+
+        // Only auto-reconnect if logged in and page is visible
+        if (localStorage.getItem('token') && document.visibilityState !== 'hidden') {
+          // Exponential backoff: 1s, 2s, 4s, 8s... max 30s
+          const delay = Math.min(1000 * Math.pow(2, reconnectAttemptsRef.current), 30000);
+          reconnectAttemptsRef.current += 1;
+          reconnectTimeoutRef.current = setTimeout(connect, delay);
         }
       };
 
-      ws.onerror = (err) => {
-        console.warn('WS error:', err.message || err);
+      ws.onerror = () => {
+        // Suppress noisy error logs — onclose will handle reconnection
       };
 
       wsRef.current = ws;
@@ -81,17 +104,68 @@ export function WebSocketProvider({ children }) {
     }
   }, []);
 
+  // Gracefully close WebSocket (intentional)
+  const disconnect = useCallback(() => {
+    if (reconnectTimeoutRef.current) {
+      clearTimeout(reconnectTimeoutRef.current);
+      reconnectTimeoutRef.current = null;
+    }
+    if (wsRef.current) {
+      intentionalCloseRef.current = true;
+      wsRef.current.close(1000, 'Intentional disconnect');
+      wsRef.current = null;
+    }
+    setConnected(false);
+  }, []);
+
   useEffect(() => {
     if (userId) {
       connect();
-    } else if (wsRef.current) {
-      wsRef.current.close();
-      wsRef.current = null;
+    } else {
+      disconnect();
     }
     return () => {
-      if (reconnectTimeoutRef.current) {
-        clearTimeout(reconnectTimeoutRef.current);
+      disconnect();
+    };
+  }, [userId, connect, disconnect]);
+
+  // Handle BFCache restoration and tab visibility changes
+  useEffect(() => {
+    // When page is restored from BFCache, reconnect WebSocket
+    const handlePageShow = (event) => {
+      if (event.persisted && userId && localStorage.getItem('token')) {
+        // Page was restored from BFCache — old WS is dead, reconnect
+        wsRef.current = null;
+        reconnectAttemptsRef.current = 0;
+        connect();
       }
+    };
+
+    // Handle tab visibility changes — disconnect when hidden, reconnect when visible
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'hidden') {
+        // Tab going to background — allow WS to stay open (server heartbeat will manage)
+        // But clear any pending reconnect timers
+        if (reconnectTimeoutRef.current) {
+          clearTimeout(reconnectTimeoutRef.current);
+          reconnectTimeoutRef.current = null;
+        }
+      } else if (document.visibilityState === 'visible') {
+        // Tab becoming visible again — reconnect if WS is dead
+        if (userId && localStorage.getItem('token') &&
+            (!wsRef.current || wsRef.current.readyState === WebSocket.CLOSED)) {
+          reconnectAttemptsRef.current = 0;
+          connect();
+        }
+      }
+    };
+
+    window.addEventListener('pageshow', handlePageShow);
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    return () => {
+      window.removeEventListener('pageshow', handlePageShow);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
   }, [userId, connect]);
 

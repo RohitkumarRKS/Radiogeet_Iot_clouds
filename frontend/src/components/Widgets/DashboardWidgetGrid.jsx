@@ -207,7 +207,7 @@ export default function DashboardWidgetGrid({
 
   const getLatestValue = (entityId, key) => {
     const data = telemetryData[entityId]?.raw?.[key];
-    if (!data || data.length === 0) return 0;
+    if (!data || data.length === 0) return null;
     return data[data.length - 1].value;
   };
 
@@ -436,7 +436,9 @@ export default function DashboardWidgetGrid({
               const cardColor = colorMap[config.color] || (config.color && config.color !== '#00695C' ? config.color : '#2563EB');
               const latest = getLatestValue(config.entityId, config.key || 'temperature');
               const rawValue = latest !== null && latest !== undefined ? latest : getStatValue(config.key);
-              const formattedVal = typeof rawValue === 'number' ? rawValue.toFixed(decimals) : (rawValue || 0);
+              const formattedVal = (rawValue !== null && rawValue !== undefined)
+                ? (typeof rawValue === 'number' ? rawValue.toFixed(decimals) : rawValue)
+                : '—';
               const devName = config.deviceName || 'Thermostat A1';
 
               return (
@@ -640,9 +642,11 @@ export default function DashboardWidgetGrid({
               const entityId = config.entityId;
               const key = config.key || 'temperature';
               const latest = getLatestValue(entityId, key);
-              const gaugeVal = (latest !== null && latest !== undefined) ? latest : 0;
+              const gaugeVal = (latest !== null && latest !== undefined) ? latest : minVal;
               const percentage = Math.min(100, Math.max(0, ((gaugeVal - minVal) / (maxVal - minVal)) * 100));
-              const displayVal = typeof gaugeVal === 'number' ? gaugeVal.toFixed(decimals) : gaugeVal;
+              const displayVal = (latest !== null && latest !== undefined)
+                ? (typeof gaugeVal === 'number' ? gaugeVal.toFixed(decimals) : gaugeVal)
+                : '—';
               const gaugeColor = colorMap[config.color] || (config.color && config.color !== '#00695C' ? config.color : '#2563EB');
 
               return (

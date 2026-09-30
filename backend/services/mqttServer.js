@@ -194,6 +194,12 @@ async function handlePublishPacket(socket, byte0, packet, headerOffset) {
       targetToken = topicMatch[1];
     }
 
+    // Check if topic matches radiogeet/:token or radiogeet/:token/telemetry
+    const rgMatch = topic.match(/^radiogeet\/(?:devices\/)?([a-zA-Z0-9_\-]+)(?:\/telemetry)?$/);
+    if (rgMatch && rgMatch[1]) {
+      targetToken = rgMatch[1];
+    }
+
     if (payload && typeof payload === 'object') {
       if (payload.token || payload.accessToken) {
         targetToken = payload.token || payload.accessToken;
@@ -227,14 +233,9 @@ async function handlePublishPacket(socket, byte0, packet, headerOffset) {
     }
 
     if (!targetToken) {
-      console.warn(`⚠️ MQTT Telemetry: No explicit device token in topic [${topic}]. Checking for registered gateway...`);
-      const singleGw = await Device.findOne({ where: { isGateway: true }, order: [['updatedAt', 'DESC']] });
-      if (singleGw) {
-        targetToken = singleGw.accessToken;
-        console.log(`ℹ️ Auto-associated telemetry with gateway [${singleGw.name}]`);
-      } else {
-        return;
-      }
+      // Strictly reject packets without a token - do not cross-contaminate or guess devices!
+      console.warn(`⚠️ MQTT Telemetry Rejected: Topic [${topic}] does not contain a registered device token.`);
+      return;
     }
 
     // 1. Check ThingsBoard Gateway Topics
@@ -342,9 +343,9 @@ async function handlePublishPacket(socket, byte0, packet, headerOffset) {
       return;
     }
 
-    // 3. Standard Direct Device Telemetry (Match by accessToken OR device name)
+    // 3. Standard Direct Device Telemetry (Match by accessToken OR device name OR clientId)
     const { Op } = require('sequelize');
-    const device = await Device.findOne({
+    let device = await Device.findOne({
       where: {
         [Op.or]: [
           { accessToken: targetToken },
@@ -353,8 +354,47 @@ async function handlePublishPacket(socket, byte0, packet, headerOffset) {
       }
     });
 
+    // Fallback: Try matching by MQTT Client ID
+    if (!device && socket.clientId) {
+      device = await Device.findOne({
+        where: {
+          [Op.or]: [
+            { accessToken: socket.clientId },
+            { name: socket.clientId },
+            { name: { [Op.like]: `%${socket.clientId}%` } }
+          ]
+        }
+      });
+      if (device) {
+        console.log(`ℹ️ Matched device by MQTT ClientID [${socket.clientId}] → ${device.name}`);
+      }
+    }
+
+    // Fallback: Try extracting device name from topic path segments
     if (!device) {
-      console.warn(`⚠️ MQTT Telemetry Rejected: Invalid device access token [${targetToken}].`);
+      const topicParts = topic.split('/').filter(Boolean);
+      for (const part of topicParts) {
+        if (part === 'v1' || part === 'devices' || part === 'me' || part === 'telemetry' || part === 'gateway') continue;
+        const partMatch = await Device.findOne({
+          where: {
+            [Op.or]: [
+              { name: part },
+              { accessToken: part },
+              { name: { [Op.like]: `%${part}%` } }
+            ]
+          }
+        });
+        if (partMatch) {
+          device = partMatch;
+          console.log(`ℹ️ Matched device by topic segment [${part}] → ${device.name}`);
+          break;
+        }
+      }
+    }
+
+
+    if (!device) {
+      console.warn(`⚠️ MQTT Telemetry Rejected: No matching device for token [${targetToken}], clientId [${socket.clientId}], topic [${topic}]`);
       return;
     }
 
@@ -363,9 +403,17 @@ async function handlePublishPacket(socket, byte0, packet, headerOffset) {
       return;
     }
 
+    // Handle nested payload formats: { data: { ... } } or { values: { ... } }
+    let telemetryData = payload;
+    if (payload.data && typeof payload.data === 'object' && !Array.isArray(payload.data)) {
+      telemetryData = payload.data;
+    } else if (payload.values && typeof payload.values === 'object' && !Array.isArray(payload.values)) {
+      telemetryData = payload.values;
+    }
+
     // Process telemetry in database + WebSocket broadcast
-    await processTelemetry(device.id, payload, Date.now());
-    console.log(`📡 MQTT Received Telemetry for Device [${device.name}]:`, payload);
+    await processTelemetry(device.id, telemetryData, Date.now());
+    console.log(`📡 MQTT Received Telemetry for Device [${device.name}] on topic [${topic}]:`, telemetryData);
 
   } catch (err) {
     console.error('MQTT PUBLISH processing error:', err.message);
@@ -469,6 +517,7 @@ function startMqttServer() {
       console.warn(`⚠️ MQTT Port ${MQTT_PORT} is in use by Mosquitto Service.`);
       console.log(`📡 Connecting CloudBoard Bridge Listener to Mosquitto on mqtt://localhost:${MQTT_PORT}...`);
       startMqttBridgeClient();
+      startCloudMqttBridge();
     } else {
       console.error('MQTT Server error:', err.message);
     }
@@ -480,6 +529,7 @@ function startMqttServer() {
 
     // Proactively check and connect Mosquitto Bridge Client if Mosquitto Service is active
     startMqttBridgeClient();
+    startCloudMqttBridge();
   });
 
   // MQTTS (TLS-encrypted MQTT) Server on Port 8883
@@ -621,16 +671,28 @@ function startMqttBridgeClient() {
 
         if (packetType === 2) {
           // CONNACK received from external broker
-          console.log(`✅ Connected to external MQTT broker on port ${MQTT_PORT}. Subscribing to v1/# ...`);
-          const sub = buildSubscribePacket(1, 'v1/#');
-          clientSocket.write(sub);
+          console.log(`✅ Connected to external MQTT broker on port ${MQTT_PORT}. Subscribing to # (all topics) ...`);
+          // Subscribe to ALL topics to catch MSG-21 regardless of its configured topic
+          const subAll = buildSubscribePacket(1, '#');
+          clientSocket.write(subAll);
         } else if (packetType === 3) {
           // PUBLISH received from external broker!
-          console.log(`📡 Bridge client received PUBLISH packet (len: ${totalPacketLength})`);
+          // Extract topic for logging
+          let logTopic = '(unknown)';
+          try {
+            const hdrLen = 1 + parseRemainingLength(packet, 1).bytesRead;
+            if (hdrLen + 2 <= packet.length) {
+              const tLen = packet.readUInt16BE(hdrLen);
+              if (hdrLen + 2 + tLen <= packet.length) {
+                logTopic = packet.toString('utf8', hdrLen + 2, hdrLen + 2 + tLen);
+              }
+            }
+          } catch(_) {}
+          console.log(`📡 Bridge received PUBLISH [${logTopic}] (len: ${totalPacketLength})`);
           await handlePublishPacket(clientSocket, byte0, packet, headerLength);
         } else if (packetType === 9) {
           // SUBACK
-          console.log(`✅ Bridge successfully subscribed to v1/# on MQTT broker.`);
+          console.log(`✅ Bridge successfully subscribed to all topics (#) on MQTT broker.`);
         } else if (packetType === 13) {
           // PINGRESP from external broker
         }
@@ -653,7 +715,131 @@ function startMqttBridgeClient() {
   } catch (e) {}
 }
 
+let cloudBridgeSocket = null;
+let cloudBridgeReconnectTimer = null;
+const CLOUD_MQTT_HOST = process.env.CLOUD_MQTT_HOST || 'broker.emqx.io';
+const CLOUD_MQTT_PORT = parseInt(process.env.CLOUD_MQTT_PORT || '1883', 10);
+
+function startCloudMqttBridge() {
+  if (cloudBridgeSocket) {
+    try { cloudBridgeSocket.destroy(); } catch (e) {}
+    cloudBridgeSocket = null;
+  }
+  if (cloudBridgeReconnectTimer) {
+    clearTimeout(cloudBridgeReconnectTimer);
+    cloudBridgeReconnectTimer = null;
+  }
+
+  const clientIdStr = 'RG_Cloud_' + Math.random().toString(36).substring(2, 8);
+  const clientIdBuf = Buffer.from(clientIdStr, 'utf8');
+
+  const remainingLength = 2 + 4 + 1 + 1 + 2 + 2 + clientIdBuf.length;
+  const connectHeader = Buffer.from([
+    0x10, remainingLength,
+    0x00, 0x04, 0x4D, 0x51, 0x54, 0x54,
+    0x04, // Version 4 (v3.1.1)
+    0x02, // Clean Session
+    0x00, 0x3C, // Keep Alive 60s
+    (clientIdBuf.length >> 8) & 0xFF, clientIdBuf.length & 0xFF
+  ]);
+  const connectPacket = Buffer.concat([connectHeader, clientIdBuf]);
+
+  try {
+    console.log(`☁️  Connecting Cloud MQTT Bridge to ${CLOUD_MQTT_HOST}:${CLOUD_MQTT_PORT}...`);
+    const cSocket = net.connect({ host: CLOUD_MQTT_HOST, port: CLOUD_MQTT_PORT }, () => {
+      cSocket.write(connectPacket);
+    });
+
+    cloudBridgeSocket = cSocket;
+    cSocket._mqttBuffer = Buffer.alloc(0);
+
+    const pingInterval = setInterval(() => {
+      if (cSocket.writable) {
+        cSocket.write(Buffer.from([0xC0, 0x00])); // PINGREQ
+      }
+    }, 25000);
+
+    cSocket.on('data', async (chunk) => {
+      cSocket._mqttBuffer = Buffer.concat([cSocket._mqttBuffer, chunk]);
+
+      while (cSocket._mqttBuffer.length >= 2) {
+        const byte0 = cSocket._mqttBuffer[0];
+        const packetType = (byte0 >> 4) & 0x0F;
+
+        let parsedLen = null;
+        try {
+          parsedLen = parseRemainingLength(cSocket._mqttBuffer, 1);
+        } catch (e) {
+          cSocket.destroy();
+          return;
+        }
+        if (!parsedLen) return;
+
+        const headerLength = 1 + parsedLen.bytesRead;
+        const totalPacketLength = headerLength + parsedLen.value;
+
+        if (cSocket._mqttBuffer.length < totalPacketLength) return;
+
+        const packet = cSocket._mqttBuffer.subarray(0, totalPacketLength);
+        cSocket._mqttBuffer = cSocket._mqttBuffer.subarray(totalPacketLength);
+
+        if (packetType === 2) { // CONNACK
+          console.log(`☁️  Connected to Free Cloud MQTT Broker (${CLOUD_MQTT_HOST}:${CLOUD_MQTT_PORT})! Subscribing to topics...`);
+          // Subscribe to radiogeet/# and v1/devices/+/telemetry
+          cSocket.write(buildSubscribePacket(1, 'radiogeet/#'));
+          cSocket.write(buildSubscribePacket(2, 'v1/devices/+/telemetry'));
+        } else if (packetType === 3) { // PUBLISH
+          let logTopic = '(unknown)';
+          try {
+            const hdrLen = 1 + parseRemainingLength(packet, 1).bytesRead;
+            if (hdrLen + 2 <= packet.length) {
+              const tLen = packet.readUInt16BE(hdrLen);
+              if (hdrLen + 2 + tLen <= packet.length) {
+                logTopic = packet.toString('utf8', hdrLen + 2, hdrLen + 2 + tLen);
+              }
+            }
+          } catch (_) {}
+          // Ignore anonymous public traffic from strangers on shared broker
+          if (logTopic === 'v1/devices/me/telemetry') return;
+
+          console.log(`☁️  Cloud Bridge received PUBLISH [${logTopic}] (len: ${totalPacketLength})`);
+          await handlePublishPacket(cSocket, byte0, packet, headerLength);
+        } else if (packetType === 9) { // SUBACK
+          console.log(`✅ Cloud Bridge active: Subscriptions confirmed on ${CLOUD_MQTT_HOST}.`);
+        }
+      }
+    });
+
+    cSocket.on('error', (err) => {
+      console.warn(`⚠️ Cloud MQTT Bridge connection error:`, err.message);
+    });
+
+    cSocket.on('close', () => {
+      clearInterval(pingInterval);
+      if (cloudBridgeSocket === cSocket) {
+        cloudBridgeSocket = null;
+        if (!cloudBridgeReconnectTimer) {
+          cloudBridgeReconnectTimer = setTimeout(() => {
+            cloudBridgeReconnectTimer = null;
+            startCloudMqttBridge();
+          }, 5000);
+        }
+      }
+    });
+  } catch (e) {
+    console.warn(`⚠️ Failed to initialize Cloud MQTT Bridge:`, e.message);
+  }
+}
+
 function stopMqttServer() {
+  if (cloudBridgeSocket) {
+    try { cloudBridgeSocket.destroy(); } catch (e) {}
+    cloudBridgeSocket = null;
+  }
+  if (cloudBridgeReconnectTimer) {
+    clearTimeout(cloudBridgeReconnectTimer);
+    cloudBridgeReconnectTimer = null;
+  }
   if (bridgeClientSocket) {
     try { bridgeClientSocket.destroy(); } catch (e) {}
     bridgeClientSocket = null;

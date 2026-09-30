@@ -77,44 +77,52 @@ export default function DashboardView() {
       const startTs = endTs - windowMs;
 
       entityIds.forEach(eid => {
-        api.get(`/telemetry/${eid}/timeseries`, { params: { startTs, endTs, limit: 100 } })
-          .then(res => {
-            const grouped = res.data;
-            const allTs = new Set();
-            Object.values(grouped).forEach(arr => arr.forEach(p => allTs.add(p.ts)));
-            const sorted = [...allTs].sort();
-            const maxTs = sorted.length > 0 ? sorted[sorted.length - 1] : 0;
-            const isRecent = maxTs > 0 && (Date.now() - maxTs < 30000);
+        Promise.all([
+          api.get(`/telemetry/${eid}/latest`).catch(() => ({ data: [] })),
+          api.get(`/telemetry/${eid}/timeseries`, { params: { startTs, endTs, limit: 100 } }).catch(() => ({ data: {} }))
+        ]).then(([latestRes, tsRes]) => {
+          const latestList = latestRes.data || [];
+          const grouped = tsRes.data || {};
 
-            const chartData = sorted.map(ts => {
-              const point = { ts, time: new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }) };
-              Object.entries(grouped).forEach(([key, arr]) => {
-                const found = arr.find(p => p.ts === ts);
-                if (found) point[key] = parseFloat(found.value.toFixed(2));
-              });
-              return point;
-            });
+          // 1. Immediately seed liveRaw with true latest values from database
+          const liveRaw = {};
+          latestList.forEach(item => {
+            const val = typeof item.value === 'number' ? item.value : (isNaN(parseFloat(item.value)) ? item.value : parseFloat(item.value));
+            liveRaw[item.key] = [{ value: val, stringValue: item.stringValue, ts: new Date(item.timestamp).getTime() }];
+          });
 
-            // If latest DB reading is recent, keep live values; if older than 30s (device inactive/off), show 0
-            const liveRaw = {};
+          // 2. Overlay timeseries points if available (never overwrite with 0)
+          Object.entries(grouped).forEach(([key, arr]) => {
+            if (arr && arr.length > 0) {
+              liveRaw[key] = arr;
+            }
+          });
+
+          const allTs = new Set();
+          Object.values(grouped).forEach(arr => arr.forEach(p => allTs.add(p.ts)));
+          const sorted = [...allTs].sort();
+          const maxTs = sorted.length > 0 ? sorted[sorted.length - 1] : (latestList[0] ? new Date(latestList[0].timestamp).getTime() : 0);
+          const isRecent = maxTs > 0 && (Date.now() - maxTs < 300000);
+
+          const chartData = sorted.map(ts => {
+            const point = { ts, time: new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }) };
             Object.entries(grouped).forEach(([key, arr]) => {
-              if (isRecent && arr && arr.length > 0) {
-                liveRaw[key] = arr;
-              } else {
-                liveRaw[key] = [{ value: 0, ts: Date.now() }];
-              }
+              const found = arr.find(p => p.ts === ts);
+              if (found) point[key] = parseFloat(found.value.toFixed(2));
             });
+            return point;
+          });
 
-            setTelemetryData(prev => ({
-              ...prev,
-              [eid]: {
-                raw: liveRaw,
-                chart: chartData,
-                lastUpdated: isRecent ? maxTs : null,
-                isDisconnected: !isRecent
-              }
-            }));
-          }).catch(() => {});
+          setTelemetryData(prev => ({
+            ...prev,
+            [eid]: {
+              raw: liveRaw,
+              chart: chartData,
+              lastUpdated: maxTs || null,
+              isDisconnected: !isRecent
+            }
+          }));
+        }).catch(() => {});
       });
     }).catch(() => navigate('/dashboards'))
       .finally(() => setLoading(false));

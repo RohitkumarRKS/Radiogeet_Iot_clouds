@@ -29,11 +29,11 @@ async function processTelemetry(entityId, data, timestamp = Date.now()) {
         stringVal = value ? 'true' : 'false';
       } else if (typeof value === 'number') {
         numericValue = isNaN(value) ? 0 : value;
-        stringVal = String(value);
+        stringVal = String(numericValue);
       } else if (typeof value === 'string') {
         const parsed = parseFloat(value);
         numericValue = !isNaN(parsed) ? parsed : 0;
-        stringVal = value;
+        stringVal = String(numericValue);
       } else if (typeof value === 'object' && value !== null) {
         numericValue = 0;
         stringVal = JSON.stringify(value);
