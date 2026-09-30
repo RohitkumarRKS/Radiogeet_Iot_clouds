@@ -144,7 +144,12 @@ async function handlePublishPacket(socket, byte0, packet, headerOffset) {
     if (offset + topicLen > packet.length) return;
     const topic = packet.toString('utf8', offset, offset + topicLen);
     offset += topicLen;
-    console.log(`📥 MQTT Packet Received [${topic}]:`, packet.toString('utf8', offset));
+    // Diagnostic: log QoS, payload byte length, and hex for short payloads
+    const _diagPayloadLen = packet.length - offset - (qos > 0 ? 2 : 0);
+    const _diagPayloadPreview = _diagPayloadLen <= 4
+      ? `hex=[${packet.subarray(offset).toString('hex')}]`
+      : packet.toString('utf8', offset).substring(0, 80);
+    console.log(`📥 MQTT Packet Received [${topic}] qos=${qos} payloadBytes=${_diagPayloadLen} ${_diagPayloadPreview}`);
 
     // Packet Identifier (2 bytes BE, if QoS > 0)
     let packetId = null;
@@ -156,6 +161,13 @@ async function handlePublishPacket(socket, byte0, packet, headerOffset) {
 
     // Payload (Remaining bytes)
     const payloadStr = packet.toString('utf8', offset);
+
+    // Gateway firmware fragment guard: MSG-21 sends opening "{" as a separate
+    // MQTT PUBLISH before the full JSON in the next packet. Silently discard
+    // these ≤2 byte fragments to avoid log spam.
+    if (payloadStr.length <= 2) {
+      return;
+    }
 
     // If QoS == 1, respond with PUBACK immediately
     if (qos === 1 && packetId !== null) {
@@ -178,7 +190,16 @@ async function handlePublishPacket(socket, byte0, packet, headerOffset) {
         } catch (e2) {
           try {
             // Repair unquoted object keys: {temperature: 25.5} -> {"temperature": 25.5}
-            const repairedJson = jsonSub.replace(/([{,]\s*)([a-zA-Z0-9_$]+)\s*:/g, '$1"$2":');
+            let repairedJson = jsonSub.replace(/([{,]\s*)([a-zA-Z0-9_$]+)\s*:/g, '$1"$2":');
+            // Repair unreplaced gateway placeholders: <Tag1>, $Tag1, %Tag1% -> 0
+            repairedJson = repairedJson.replace(/:\s*<([a-zA-Z0-9_$]+)>/g, ': 0');
+            repairedJson = repairedJson.replace(/:\s*\$([a-zA-Z0-9_]+)/g, ': 0');
+            repairedJson = repairedJson.replace(/:\s*%([a-zA-Z0-9_]+)%/g, ': 0');
+            // Repair unquoted string values like : Tag1 -> : 0
+            repairedJson = repairedJson.replace(/:\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*([,}])/g, (m, id, end) => {
+              if (id === 'true' || id === 'false' || id === 'null') return `: ${id}${end}`;
+              return `: 0${end}`;
+            });
             payload = JSON.parse(repairedJson);
           } catch (e3) { /* malformed payload */ }
         }
